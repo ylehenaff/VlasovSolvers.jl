@@ -438,5 +438,4 @@ plot!(x-> 0.2845x - 6.2, label="y = 0.2845x - 6.2")
 ## Conclusion
 
 
-We illustrated the fact that the Vlasov-HMF equations is a toy model that exhibits a behavior very close to the 
-Vlasov-Poisson system. 
+We illustrated the fact that the Vlasov-HMF equations is a toy model that exhibits a behavior very close to the Vlasov-Poisson system. 
