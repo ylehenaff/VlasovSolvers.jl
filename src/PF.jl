@@ -22,28 +22,59 @@ end
     and holds some pre-allocated arrays used for the time integration only.
 """
 struct symplectic_rkn4
-    a :: Array{Float64, 2}
-    b̄ :: Vector{Float64}
-    c :: Vector{Float64}
-    b :: Vector{Float64}
-    dt :: Float64
-    fg ::       Array{Float64, 2}
-    G ::        Array{Float64, 1}
+    a ::    Array{Float64, 2}
+    b̄ ::    Vector{Float64}
+    c ::    Vector{Float64}
+    b ::    Vector{Float64}
+    dt ::   Float64
+    fg ::   Array{Float64, 2}
+    G ::    Array{Float64, 1}
     nb_steps :: Int64
 
     function symplectic_rkn4(X, dt)
         # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
-        a = [0.0        0.0       0.0; 
-            (2-√3)/12   0.0           0.0; 
+        a = [0.0        0.0         0.0; 
+            (2-√3)/12   0.0         0.0; 
             0.0         √(3)/6      0.0]
         b̄ = [(5 - 3*√3)/24,     (3+√3)/12,  (1+√3)/24]
         c = [(3+√3)/6,          (3-√3)/6,   (3+√3)/6]
         b = [(3-2*√3)/12,       1/2,        (3+2*√3)/12]
 
+        stages = 3
         new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt, 
-            zeros(Float64, length(X), 3),  # fg
+            zeros(Float64, length(X), stages),  # fg
             similar(X), # G
-            3 # number of steps
+            stages # number of steps
+        )
+    end
+end
+
+
+struct rkn5
+    a :: Array{Float64, 2}
+    b̄ :: Vector{Float64}
+    c :: Vector{Float64}
+    b :: Vector{Float64}
+    dt :: Float64
+    fg :: Array{Float64, 2}
+    G ::  Array{Float64, 1}
+    nb_steps :: Int64
+
+    function rkn5(X, dt)
+        # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
+        a = [0.0        0.0         0.0     0.0; 
+            1/50        0.0         0.0     0.0; 
+            -1/27       7/27        0.0     0.0;
+            3/10        -2/35       9/35    0.0]
+        b̄ = [14/336,    100/336,    54/336, 0.0]
+        c = [0,         1/5,        2/3,    1.0]
+        b = [14/336,    125/336,    162/336, 35/336]
+
+        stages = 4
+        new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt, 
+            zeros(Float64, length(X), stages),  # fg
+            similar(X), # G
+            stages
         )
     end
 end
@@ -69,7 +100,7 @@ struct ParticleMover
     Φ_grid ::Vector{Float64}
     idxonmesh :: Vector{Int64}
     idxonmeshp1 :: Vector{Int64}
-    rkn :: symplectic_rkn4
+    rkn
     dt :: Float64
     
     function ParticleMover(particles::Particles, meshx, K, dt; kx=1)
@@ -94,7 +125,9 @@ struct ParticleMover
                 similar(tmpcosk), similar(tmpsink), matrix_poisson, 
                 Vector{Float64}(undef, nx), Vector{Float64}(undef, nx), 
                 Vector{Int64}(undef, np), Vector{Int64}(undef, np), 
-                symplectic_rkn4(particles.x, dt), dt)
+                symplectic_rkn4(particles.x, dt),
+                # rkn5(particles.x, dt),
+                dt)
     end
 end
 
