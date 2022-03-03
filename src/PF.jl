@@ -21,7 +21,7 @@ end
     Defines Runge-Kutta-Nystrom time integrator via its Butcher tableau,
     and holds some pre-allocated arrays used for the time integration only.
 """
-struct rkn_order4
+struct symplectic_rkn4
     a :: Array{Float64, 2}
     b̄ :: Vector{Float64}
     c :: Vector{Float64}
@@ -29,8 +29,9 @@ struct rkn_order4
     dt :: Float64
     fg ::       Array{Float64, 2}
     G ::        Array{Float64, 1}
+    nb_steps :: Int64
 
-    function rkn_order4(X, dt)
+    function symplectic_rkn4(X, dt)
         # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
         a = [0.0        0.0       0.0; 
             (2-√3)/12   0.0           0.0; 
@@ -41,7 +42,8 @@ struct rkn_order4
 
         new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt, 
             zeros(Float64, length(X), 3),  # fg
-            similar(X) # G
+            similar(X), # G
+            3 # number of steps
         )
     end
 end
@@ -67,7 +69,7 @@ struct ParticleMover
     Φ_grid ::Vector{Float64}
     idxonmesh :: Vector{Int64}
     idxonmeshp1 :: Vector{Int64}
-    rkn :: rkn_order4
+    rkn :: symplectic_rkn4
     dt :: Float64
     
     function ParticleMover(particles::Particles, meshx, K, dt; kx=1)
@@ -87,7 +89,12 @@ struct ParticleMover
         matrix_poisson ./= meshx.step^2
 
 
-        new(Φ, ∂Φ, meshx, kx, K, Vector{Float64}(undef, K), Vector{Float64}(undef, K), tmpcosk, tmpsink, similar(tmpcosk), similar(tmpsink), matrix_poisson, Vector{Float64}(undef, nx), Vector{Float64}(undef, nx), Vector{Int64}(undef, np), Vector{Int64}(undef, np), rkn_order4(particles.x, dt), dt)
+        new(Φ, ∂Φ, meshx, kx, K, Vector{Float64}(undef, K), 
+                Vector{Float64}(undef, K), tmpcosk, tmpsink, 
+                similar(tmpcosk), similar(tmpsink), matrix_poisson, 
+                Vector{Float64}(undef, nx), Vector{Float64}(undef, nx), 
+                Vector{Int64}(undef, np), Vector{Int64}(undef, np), 
+                symplectic_rkn4(particles.x, dt), dt)
     end
 end
 
@@ -115,9 +122,9 @@ end
     Updates X, V in place, and returns coefficients C, S at current time.
 
 """
-function symplectic_RKN_order4!(p, pmover, kernel)
+function RKN_timestepper!(p, pmover, kernel)
     @views begin
-        for s=1:3
+        for s=1:pmover.rkn.nb_steps
             @. pmover.rkn.G = p.x + p.v * pmover.rkn.c[s] + pmover.rkn.a[s, 1] * pmover.rkn.fg[:, 1] + 
                                                              pmover.rkn.a[s, 2] * pmover.rkn.fg[:, 2] + 
                                                              pmover.rkn.a[s, 3] * pmover.rkn.fg[:, 3]
@@ -259,7 +266,7 @@ end
 
 
 function PF_step!(p::Particles, pmover::ParticleMover; kernel=kernel_poisson!)
-    symplectic_RKN_order4!(p, pmover, kernel)
+    RKN_timestepper!(p, pmover, kernel)
     # strang_splitting!(p, pmover, kernel)
     # strang_splitting_implicit!(p, pmover, kernel)
     
