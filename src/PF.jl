@@ -125,20 +125,19 @@ end
 function RKN_timestepper!(p, pmover, kernel)
     @views begin
         for s=1:pmover.rkn.nb_steps
-            @. pmover.rkn.G = p.x + p.v * pmover.rkn.c[s] + pmover.rkn.a[s, 1] * pmover.rkn.fg[:, 1] + 
-                                                             pmover.rkn.a[s, 2] * pmover.rkn.fg[:, 2] + 
-                                                             pmover.rkn.a[s, 3] * pmover.rkn.fg[:, 3]
-     
+            @. pmover.rkn.G = p.x + p.v * pmover.rkn.c[s]
+            for ss = 1:pmover.rkn.nb_steps
+                @. pmover.rkn.G +=  pmover.rkn.a[s, ss] * pmover.rkn.fg[:, ss]
+            end
+            
             kernel(pmover.rkn.fg[:, s], pmover.rkn.G, p, pmover; coeffdt=0)
         end
     
-        @. p.x += pmover.dt * p.v + pmover.rkn.b̄[1] * pmover.rkn.fg[:, 1] + 
-                                    pmover.rkn.b̄[2] * pmover.rkn.fg[:, 2] + 
-                                    pmover.rkn.b̄[3] * pmover.rkn.fg[:, 3]
-        @. p.v += pmover.rkn.b[1] * pmover.rkn.fg[:, 1] + 
-                    pmover.rkn.b[2] * pmover.rkn.fg[:, 2] + 
-                    pmover.rkn.b[3] * pmover.rkn.fg[:, 3]
-        
+        @. p.x += pmover.dt * p.v
+        for ss=1:pmover.rkn.nb_steps
+            @. p.x += pmover.rkn.b̄[ss] * pmover.rkn.fg[:, ss]
+            @. p.v += pmover.rkn.b[ss] * pmover.rkn.fg[:, ss]
+        end
         kernel(pmover.∂Φ, p.x, p, pmover)
     end
 end
