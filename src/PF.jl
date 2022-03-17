@@ -272,7 +272,7 @@ end
     Returns the square of the electrical energy
 """
 function compute_electricalenergy²(p, pmover)
-    return sum(p.wei .* pmover.Φ)
+    return sum((pmover.C.^2 .+ pmover.S.^2) ./ (1:pmover.K).^2) / π^2 * pmover.meshx.stop/2
 end
 
 
