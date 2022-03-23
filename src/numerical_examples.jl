@@ -10,6 +10,8 @@ struct LandauDamping
     vmin 
     vmax
     Etot²exact
+    momentumexact
+    L²norm²exact
 
     function LandauDamping(; alpha=0.001, kx=0.5, mu=0.0, beta=1.0,
                             shortname="Landau", longname="(Strong/Weak) Landau damping", L=nothing, vmin=-9, vmax=9)
@@ -19,7 +21,9 @@ struct LandauDamping
             f, 
             shortname, longname, 
             L, vmin, vmax, 
-            0.5 * (L * (1+mu^2) + alpha^2 * L^3 / (8π^2))
+            0.5 * (L * (1+mu^2) + alpha^2 * L^3 / (8π^2)), # Etot
+            L*mu, # momentum
+            0.5 * L * (1 + alpha^2/2) * sqrt(beta/π) # (L² norm)^2
         )
     end
 end
@@ -38,6 +42,8 @@ struct TwoStreamInstability
     vmax
     v0
     Etot²exact
+    momentumexact
+    L²norm²exact
 
     function TwoStreamInstability(; alpha=0.001, kx=0.2, v0=3.0, beta=1.0,
                                     shortname="TSI", longname="Two-Stream Instability", L=nothing, vmin=-9, vmax=9)
@@ -48,7 +54,9 @@ struct TwoStreamInstability
             shortname, longname, 
             L, 
             vmin, vmax, v0, 
-            0.5 * (L * (1+v0^2) + alpha^2 * L^3 / (8π^2))
+            0.5 * (L * (1+v0^2) + alpha^2 * L^3 / (8π^2)), # Etot
+            0., # momentum
+            0.25 * L * (1 + alpha^2/2) * sqrt(beta/π) * (1 + exp(-beta * v0^2)) # (L² norm)^2
         )
     end
 end
@@ -64,6 +72,8 @@ struct TwoStreamInstabilityAlternativeFormulation
     vmin 
     vmax
     Etot²exact
+    momentumexact
+    L²norm²exact
 
     function TwoStreamInstabilityAlternativeFormulation(; alpha=0.05, kx=0.2, beta=1.0,
                                     shortname="TSI_alt", longname="Two-Stream Instability Alternative Formulation", L=nothing, vmin=-9, vmax=9)
@@ -74,8 +84,10 @@ struct TwoStreamInstabilityAlternativeFormulation
             shortname, longname, 
             L, 
             vmin, vmax,
-            0.5 * (L * 3/beta^2 + alpha^2 * L^3 / (8π^2) / beta^2)
-        )
+            0.5 * (L * 3/beta^2 + alpha^2 * L^3 / (8π^2) / beta^2), # Etot
+            0., # momentum
+            3/8 * L * (1 + alpha^2/2) / sqrt(π*beta^3) # (L² norm)^2
+            )
     end
 end
 
@@ -97,12 +109,15 @@ struct BumpOnTail
     vmin
     vmax
     Etot²exact
+    momentumexact
+    L²norm²exact
     
 
     function BumpOnTail(; alpha=0.04, kx=0.3, mu1=0.0, mu2=4.5, beta1=1.0, beta2=4.0,
                         n1=0.9, n2=0.2, shortname="BoT", longname="Bump on Tail", L=nothing, vmin=-9, vmax=9)
         isnothing(L) ? L = 2π / kx : nothing
-        f(x,v) = (1 + alpha * cos(kx*x)) * ((n1*exp(-beta1*(v-mu1)^2 / 2) + n2*exp(-beta2*(v-mu2)^2 / 2)) / √(2π))
+        f(x,v) = (1 + alpha * cos(kx*x)) * 
+            (n1*exp(-beta1*(v-mu1)^2 / 2) + n2*exp(-beta2*(v-mu2)^2 / 2)) / (n1*sqrt(2π/beta1) + n2*sqrt(2π/beta2))
         new(alpha, kx, 
             mu1, mu2, 
             beta1, beta2, 
@@ -111,10 +126,17 @@ struct BumpOnTail
             shortname, longname, 
             L, 
             vmin, vmax, 
-            0.5 * (L * (
-                        n1 * (1 / beta1 + mu1^2) / sqrt(beta1) + 
-                        n2 * (1 / beta2 + mu2^2) / sqrt(beta2)
-                    ) + alpha^2 * L^3 / (8π^2) * (n1/sqrt(beta1) + n2/sqrt(beta2))^2)
+            0.5 * L * ((
+                        n1 * sqrt(2π/beta1) * (1 / beta1 + mu1^2)+ 
+                        n2 * sqrt(2π/beta2) * (1 / beta2 + mu2^2) 
+                    ) / (n1*sqrt(2π/beta1) + n2*sqrt(2π/beta2)) + 
+                    alpha^2 * L^2 / (8π^2)), # Etot
+            L / (n1*sqrt(2π/beta1) + n2*sqrt(2π/beta2)) * (n1*mu1*sqrt(2π/beta1) + n2*mu2*sqrt(2π/beta2)), # momentum
+            L * (1+alpha^2/2) / (2π) / (n1/sqrt(beta1) + n2/sqrt(beta2))^2 * (
+                n1^2*sqrt(π/beta1) + n2^2*sqrt(π/beta2) + 
+                    2*n1*n2*exp(-0.5( beta1*mu1^2 + beta2*mu2^2 - ( (beta1*mu1 + beta2*mu2) / sqrt(beta1+beta2) )^2 )) *
+                    sqrt(2π / (beta1+beta2))
+            ) # (L² norm)^2
         )
     end
 end
@@ -164,6 +186,8 @@ struct StationaryGaussian
     vmin
     vmax
     Etot²exact
+    momentumexact
+    L²norm²exact
 
     function StationaryGaussian(; alpha=0.2, kx=1, beta=1,
                                                 shortname="gaussian", longname="Stationary Gaussian", L=nothing, 
@@ -174,7 +198,9 @@ struct StationaryGaussian
             shortname, longname, 
             L, 
             vmin, vmax,
-            0.5 * alpha * 1/beta * L
+            0.5 * alpha * 1/beta * L, # Etot
+            0., # momentum
+            L * alpha^2/2 * sqrt(beta/π) # (L² norm)^2
         )
     end
 end
