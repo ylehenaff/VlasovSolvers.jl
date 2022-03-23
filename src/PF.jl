@@ -120,12 +120,18 @@ struct ParticleMover
         matrix_poisson ./= meshx.step^2
 
 
-        new(Φ, ∂Φ, meshx, kx, K, Vector{Float64}(undef, K), 
-                Vector{Float64}(undef, K), tmpcosk, tmpsink, 
-                similar(tmpcosk), similar(tmpsink), matrix_poisson, 
-                Vector{Float64}(undef, nx), Vector{Float64}(undef, nx), 
-                Vector{Int64}(undef, np), Vector{Int64}(undef, np), 
-                symplectic_rkn4(particles.x, dt),
+        new(Φ, ∂Φ, meshx, kx, K, 
+                Vector{Float64}(undef, K),  #C
+                Vector{Float64}(undef, K), #S
+                tmpcosk, tmpsink, 
+                similar(tmpcosk), #tmpcoskimplicit
+                similar(tmpsink), #tmpsinkimplicit
+                matrix_poisson, 
+                Vector{Float64}(undef, nx), #ρ
+                Vector{Float64}(undef, nx), #Φ_grid
+                Vector{Int64}(undef, np), #idxonmesh
+                Vector{Int64}(undef, np), #idxonmeshp1
+                symplectic_rkn4(particles.x, dt), # rkn
                 # rkn5(particles.x, dt),
                 dt)
     end
@@ -271,8 +277,8 @@ end
 
     Returns the square of the electrical energy
 """
-function compute_electricalenergy²(p, pmover)
-    return sum((pmover.C.^2 .+ pmover.S.^2) ./ (1:pmover.K).^2) / π^2 * pmover.meshx.stop/2
+function compute_electricalenergy²(pmover)
+    return sum((pmover.C.^2 .+ pmover.S.^2) ./ (1:pmover.K).^2) * pmover.meshx.stop/(2π^2)
 end
 
 
@@ -304,7 +310,7 @@ function PF_step!(p::Particles, pmover::ParticleMover; kernel=kernel_poisson!)
     
     periodic_boundary_conditions!(p, pmover)
     
-    E² = compute_electricalenergy²(p, pmover)
+    E² = compute_electricalenergy²(pmover)
     return E², compute_momentum(p), compute_totalenergy²(p, E²)
 end
 
