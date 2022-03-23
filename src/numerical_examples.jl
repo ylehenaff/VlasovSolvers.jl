@@ -203,12 +203,20 @@ end
 # ==================
 
 example_landaudamping = LandauDamping(alpha=0.001, kx=0.5, mu=0., beta=1.,
-                                        longname="Weak Landau damping", shortname="weakLD", vmin=-9, vmax=9);
+                                        longname="Weak Landau damping", shortname="weakLD", 
+                                        vmin=-12, vmax=12);
 example_stronglandaudamping = LandauDamping(alpha=0.5, kx=0.5, mu=0., beta=1., 
-                                        longname="Strong Landau damping", shortname="strongLD");
-example_twostreaminstability = TwoStreamInstability(alpha=0.001, kx=0.2, v0=3.);
-example_twostreaminstabilityalternativeformulation = TwoStreamInstabilityAlternativeFormulation(alpha=0.05, kx=0.2);
-example_bumpontail = BumpOnTail(alpha=0.04, kx=0.3, mu1=0., mu2=4.5, beta1=1, beta2=4);
-example_nonhomogeneousstationarysolution = NonHomogeneousStationarySolution(alpha=0.2, kx=1, beta=2);
-example_stationarygaussian = StationaryGaussian(alpha=0.2, kx=1, beta=1);
-example_test = Test(alpha=0.2, kx=1, beta=1);
+                                        longname="Strong Landau damping", shortname="strongLD", 
+                                        vmin=-12, vmax=12);
+example_twostreaminstability = TwoStreamInstability(alpha=0.001, kx=0.2, v0=3., 
+                                                    vmin=-12, vmax=12);
+example_twostreaminstabilityalternativeformulation = TwoStreamInstabilityAlternativeFormulation(alpha=0.05, kx=0.2,
+                                                                                                vmin=-12, vmax=12);
+example_bumpontail = BumpOnTail(alpha=0.04, kx=0.3, mu1=0., mu2=4.5, beta1=1, beta2=4, 
+                                vmin=-12, vmax=12);
+example_nonhomogeneousstationarysolution = NonHomogeneousStationarySolution(alpha=0.2, kx=1, beta=2, 
+                                                                            vmin=-12, vmax=12);
+example_stationarygaussian = StationaryGaussian(alpha=0.2, kx=1, beta=1, 
+                                                vmin=-12, vmax=12);
+example_test = Test(alpha=0.2, kx=1, beta=1, 
+                    vmin=-12, vmax=12);
