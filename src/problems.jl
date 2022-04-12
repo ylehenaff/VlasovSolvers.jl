@@ -26,34 +26,30 @@ struct VlasovProblem{Method<:AbstractMethod} <: AbstractProblem
 
 end
 
+export solve!
 
 """
     solve!( problem, stepper, dt, nsteps)
 
 """
-function solve( problem::VlasovProblem{BSLSpline}, stepper::StrangSplitting, dt, nsteps)
+function solve!( problem::VlasovProblem{BSLSpline}, stepper::StrangSplitting, dt, nsteps)
   
   nrj = Vector{Float64}(undef, nsteps)
 
-  sol = VlasovSolution1D1V() 
-
-  time = 0.0
   for it in 1:nsteps
 
      advection_x!( problem.f, 0.5dt, problem.method.p)
-     energy = advection_v!( problem.f, dt, problem.method.p)
-     time += dt
-     push!(sol.times, time)
-     push!(sol.energy, energy)
+     sol = advection_v!( problem.f, dt, problem.method.p)
+     nrj[it] = sol
      advection_x!( problem.f, 0.5dt, problem.method.p)
 
   end
                   
-  sol
+  nrj
 
 end
 
-function solve( problem::VlasovProblem{Fourier}, stepper::StrangSplitting, dt, nsteps)
+function solve!( problem::VlasovProblem{Fourier}, stepper::StrangSplitting, dt, nsteps)
 
     # Initialize distribution function
     x = problem.f.xgrid.points |> collect
@@ -81,27 +77,20 @@ function solve( problem::VlasovProblem{Fourier}, stepper::StrangSplitting, dt, n
     ρ̂ = fft(ρ)./modes
     e .= vec(real(ifft(-1im .* ρ̂)))
     
-    sol = VlasovSolution1D1V() 
-    time = 0.0
-    push!(sol.times, time)
-    energy = log(sqrt((sum(e.^2)) * dx))
-    push!(sol.energy, energy)
+    nrj = Vector{Float64}(undef, nsteps)
     
     for it in 1:nsteps
 
         advection_v!(fᵀ, problem.method, e, 0.5dt)
         transpose!(f,fᵀ)
         advection_x!( f, problem.method, e, v, dt)
-        energy = log(sqrt((sum(e.^2)) * dx))
-        time += dt
-        push!(sol.times, time)
-        push!(sol.energy, energy)
+        nrj[it] = log(sqrt((sum(e.^2)) * dx))
         transpose!(fᵀ,f)
         advection_v!(fᵀ, problem.method, e, 0.5dt)
 
     end
 
-    sol
+    nrj
 
 end
 

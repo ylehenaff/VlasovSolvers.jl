@@ -47,10 +47,10 @@ landau!(f, α, kx)
 
 prob = VlasovProblem(f, BSLSpline(5), dev)
 
-sol = solve(prob, stepper, dt, nsteps )
+sol = solve!(prob, stepper, dt, nsteps )
 
-t = sol.times
+t = LinRange(0,100,1000)
 
-plot(sol; label = "E")
+plot( t, sol; label = "E")
 plot!(t, -0.1533*t.-5.50; label="-0.1533t.-5.5")
 ```
