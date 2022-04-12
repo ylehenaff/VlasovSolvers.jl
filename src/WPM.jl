@@ -303,7 +303,7 @@ end
 
 
 
-function PF_step!(p::Particles, pmover::ParticleMover; kernel=kernel_poisson!)
+function WPM_step!(p::Particles, pmover::ParticleMover; kernel=kernel_poisson!)
     RKN_timestepper!(p, pmover, kernel)
     # strang_splitting!(p, pmover, kernel)
     # strang_splitting_implicit!(p, pmover, kernel)

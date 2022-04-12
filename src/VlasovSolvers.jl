@@ -12,6 +12,6 @@ module VlasovSolvers
   include("steppers.jl")
   include("fourier.jl")
   include("problems.jl")
-  include("PF.jl")
+  include("WPM.jl")
 
 end
