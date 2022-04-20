@@ -121,8 +121,8 @@ struct ParticleMover
 
 
         new(Φ, ∂Φ, meshx, kx, K, 
-                Vector{Float64}(undef, K),  #C
-                Vector{Float64}(undef, K), #S
+                Vector{Float64}(undef, 2K+1),  #C
+                Vector{Float64}(undef, 2K+1), #S
                 tmpcosk, tmpsink, 
                 similar(tmpcosk), #tmpcoskimplicit
                 similar(tmpsink), #tmpsinkimplicit
@@ -232,7 +232,12 @@ function kernel_poisson!(dst, x, p, pmover; coeffdt=0)
     
     pmover.Φ .= 0
 
-    for k=1:pmover.K        
+
+    for k=-pmover.K:pmover.K        
+        idxk = pmover.K + k + 1
+        if k == 0
+            continue
+        end
         @. pmover.tmpcosk = cos(x * (k * pmover.kx))
         @. pmover.tmpsink = sin(x * (k * pmover.kx))
 
@@ -241,12 +246,12 @@ function kernel_poisson!(dst, x, p, pmover; coeffdt=0)
             @. pmover.tmpsinkimplicit = sin((x + pmover.dt * coeffdt * p.v) * (k * pmover.kx))
         end
         
-        pmover.C[k] = sum(pmover.tmpcosk .* p.wei)
-        pmover.S[k] = sum(pmover.tmpsink .* p.wei)
+        pmover.C[idxk] = sum(pmover.tmpcosk .* p.wei)
+        pmover.S[idxk] = sum(pmover.tmpsink .* p.wei)
         
         if coeffdt > 0 
-            pmover.C[k] += -sum(p.v .* pmover.tmpsink .* p.wei) * k * 2π / pmover.meshx.stop * pmover.dt * coeffdt
-            pmover.S[k] +=  sum(p.v .* pmover.tmpcosk .* p.wei) * k * 2π / pmover.meshx.stop * pmover.dt * coeffdt
+            pmover.C[idxk] += -sum(p.v .* pmover.tmpsink .* p.wei) * k * 2π / pmover.meshx.stop * pmover.dt * coeffdt
+            pmover.S[idxk] +=  sum(p.v .* pmover.tmpcosk .* p.wei) * k * 2π / pmover.meshx.stop * pmover.dt * coeffdt
         end
 
         if coeffdt > 0
@@ -254,16 +259,16 @@ function kernel_poisson!(dst, x, p, pmover; coeffdt=0)
             pmover.tmpsink .= pmover.tmpsinkimplicit
         end
         
-        @. pmover.Φ += (pmover.C[k] * pmover.tmpcosk + pmover.S[k] * pmover.tmpsink) / k^2
+        @. pmover.Φ += (pmover.C[idxk] * pmover.tmpcosk + pmover.S[idxk] * pmover.tmpsink) / k^2
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        @. dst += (pmover.C[k] * pmover.tmpsink - pmover.S[k] .* pmover.tmpcosk) / k 
+        @. dst += (pmover.C[idxk] * pmover.tmpsink - pmover.S[idxk] .* pmover.tmpcosk) / k 
     end
     
-    dst ./= π
-    pmover.Φ .*= pmover.meshx.stop / (2*π^2)
+    dst ./= 2π
+    pmover.Φ .*= pmover.meshx.stop / (4π^2)
 end
 
 function kernel_gyrokinetic!(dst, x, p, pmover)
@@ -278,7 +283,8 @@ end
     Returns the square of the electrical energy
 """
 function compute_electricalenergy²(pmover)
-    return sum((pmover.C.^2 .+ pmover.S.^2) ./ (1:pmover.K).^2) * pmover.meshx.stop/(2π^2)
+    return sum((pmover.C[k+pmover.K+1].^2 .+ pmover.S[k+pmover.K+1].^2) / k^2 for k=-pmover.K:pmover.K if k != 0) * pmover.meshx.stop/(4π^2)
+    # return sum((pmover.C.^2 .+ pmover.S.^2) ./ (1:pmover.K).^2) * pmover.meshx.stop/(2π^2)
 end
 
 
