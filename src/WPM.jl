@@ -169,7 +169,7 @@ function RKN_timestepper!(p, pmover, kernel)
                 @. pmover.rkn.G +=  pmover.rkn.a[s, ss] * pmover.rkn.fg[:, ss]
             end
             
-            kernel(pmover.rkn.fg[:, s], pmover.rkn.G, p, pmover; coeffdt=0)
+            kernel(pmover.rkn.fg[:, s], pmover.rkn.G, p, pmover)
         end
     
         @. p.x += pmover.dt * p.v
@@ -222,13 +222,8 @@ end
 """
 Compute -∂_x Φ[f](`x` + `pmover.dt*coeffdt*p.v`) and stores it in `dst`. Also updates `pmover.Φ`
 """
-function kernel_poisson!(dst, x, p, pmover; coeffdt=0)
+function kernel_poisson!(dst, x, p, pmover)
     dst .= 0
-    
-    if coeffdt > 0
-        pmover.tmpcoskimplicit .= similar(pmover.tmpcosk)
-        pmover.tmpsinkimplicit .= similar(pmover.tmpsink)
-    end
     
     pmover.Φ .= 0
 
@@ -240,24 +235,9 @@ function kernel_poisson!(dst, x, p, pmover; coeffdt=0)
         end
         @. pmover.tmpcosk = cos(x * (k * pmover.kx))
         @. pmover.tmpsink = sin(x * (k * pmover.kx))
-
-        if coeffdt > 0
-            @. pmover.tmpcoskimplicit = cos((x + pmover.dt * coeffdt * p.v) * (k * pmover.kx))
-            @. pmover.tmpsinkimplicit = sin((x + pmover.dt * coeffdt * p.v) * (k * pmover.kx))
-        end
         
         pmover.C[idxk] = sum(pmover.tmpcosk .* p.wei)
         pmover.S[idxk] = sum(pmover.tmpsink .* p.wei)
-        
-        if coeffdt > 0 
-            pmover.C[idxk] += -sum(p.v .* pmover.tmpsink .* p.wei) * k * 2π / pmover.meshx.stop * pmover.dt * coeffdt
-            pmover.S[idxk] +=  sum(p.v .* pmover.tmpcosk .* p.wei) * k * 2π / pmover.meshx.stop * pmover.dt * coeffdt
-        end
-
-        if coeffdt > 0
-            pmover.tmpcosk .= pmover.tmpcoskimplicit
-            pmover.tmpsink .= pmover.tmpsinkimplicit
-        end
         
         @. pmover.Φ += (pmover.C[idxk] * pmover.tmpcosk + pmover.S[idxk] * pmover.tmpsink) / k^2
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
