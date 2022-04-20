@@ -220,19 +220,18 @@ end
 
 # ===== Kernel computations ==== #
 """
-Compute -∂_x Φ[f](`x` + `pmover.dt*coeffdt*p.v`) and stores it in `dst`. Also updates `pmover.Φ`
+Compute -∂_x Φ[f](`x`) and stores it in `dst`. Also updates `pmover.Φ`
 """
 function kernel_poisson!(dst, x, p, pmover)
     dst .= 0
-    
     pmover.Φ .= 0
 
-
     for k=-pmover.K:pmover.K        
-        idxk = pmover.K + k + 1
         if k == 0
             continue
         end
+        idxk = pmover.K + k + 1
+
         @. pmover.tmpcosk = cos(x * (k * pmover.kx))
         @. pmover.tmpsink = sin(x * (k * pmover.kx))
         
