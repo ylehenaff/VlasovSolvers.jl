@@ -11,10 +11,10 @@ using LinearAlgebra
 Describe meta particules, represented by a Dirac disbtibution in (x, v), with a weight (~a high) of wei
 """
 struct Particles
-    x ::Vector{Float64}     # list of the positions
-    v ::Vector{Float64}     # list of the velocities
-    wei ::Vector{Float64}   # list of the weights of the particules
-    nbpart ::Int64          # nmber of particules
+    x :: Vector{Float64}     # list of the positions
+    v :: Vector{Float64}     # list of the velocities
+    wei :: Vector{Float64}   # list of the weights of the particules
+    nbpart :: Int64          # nmber of particules
 end
 
 """
@@ -84,23 +84,24 @@ end
 Holds pre-allocated arrays
 """
 struct ParticleMover
-    Φ ::Vector{Float64}
+    Φ :: Vector{Float64}
     ∂Φ :: Vector{Float64}
-    meshx
-    kx
-    K
-    C ::Vector{Float64}
-    S ::Vector{Float64}
-    tmpcosk ::Vector{Float64}
-    tmpsink ::Vector{Float64}
-    tmpcoskimplicit ::Vector{Float64}
-    tmpsinkimplicit ::Vector{Float64}
+    meshx :: OneDGrid
+    L :: Float64
+    kx :: Float64
+    K :: Int64
+    C :: Vector{Float64}
+    S :: Vector{Float64}
+    tmpcosk :: Vector{Float64}
+    tmpsink :: Vector{Float64}
+    tmpcoskimplicit :: Vector{Float64}
+    tmpsinkimplicit :: Vector{Float64}
     poisson_matrix
-    ρ ::Vector{Float64}
-    Φ_grid ::Vector{Float64}
+    ρ :: Vector{Float64}
+    Φ_grid :: Vector{Float64}
     idxonmesh :: Vector{Int64}
     idxonmeshp1 :: Vector{Int64}
-    rkn
+    rkn :: symplectic_rkn4
     dt :: Float64
     
     function ParticleMover(particles::Particles, meshx, K, dt; kx=1)
@@ -120,7 +121,7 @@ struct ParticleMover
         matrix_poisson ./= meshx.step^2
 
 
-        new(Φ, ∂Φ, meshx, kx, K, 
+        new(Φ, ∂Φ, meshx, meshx.stop, kx, K, 
                 Vector{Float64}(undef, 2K+1),  #C
                 Vector{Float64}(undef, 2K+1), #S
                 tmpcosk, tmpsink, 
@@ -165,6 +166,7 @@ function RKN_timestepper!(p, pmover, kernel)
     @views begin
         for s=1:pmover.rkn.nb_steps
             @. pmover.rkn.G = p.x + p.v * pmover.rkn.c[s]
+
             for ss = 1:pmover.rkn.nb_steps
                 @. pmover.rkn.G +=  pmover.rkn.a[s, ss] * pmover.rkn.fg[:, ss]
             end
@@ -177,6 +179,7 @@ function RKN_timestepper!(p, pmover, kernel)
             @. p.x += pmover.rkn.b̄[ss] * pmover.rkn.fg[:, ss]
             @. p.v += pmover.rkn.b[ss] * pmover.rkn.fg[:, ss]
         end
+
         kernel(pmover.∂Φ, p.x, p, pmover)
     end
 end
@@ -226,28 +229,33 @@ function kernel_poisson!(dst, x, p, pmover)
     dst .= 0
     pmover.Φ .= 0
 
-    for k=-pmover.K:pmover.K        
-        if k == 0
-            continue
-        end
-        idxk = pmover.K + k + 1
+    pmover.C .= 0
+    pmover.S .= 0
 
-        @. pmover.tmpcosk = cos(x * (k * pmover.kx))
-        @. pmover.tmpsink = sin(x * (k * pmover.kx))
+    for k=-pmover.K:pmover.K
+        (k == 0)&&continue
+
+        # idxk = pmover.K + k + 1
+
+        @inbounds for i = eachindex(x)
+            (pmover.tmpsink[i], pmover.tmpcosk[i]) = sincos(x[i] * k * pmover.kx)
+        end
         
-        pmover.C[idxk] = sum(pmover.tmpcosk .* p.wei)
-        pmover.S[idxk] = sum(pmover.tmpsink .* p.wei)
+        for i = 1:p.nbpart
+            pmover.C[pmover.K + k + 1] += pmover.tmpcosk[i] * p.wei[i]
+            pmover.S[pmover.K + k + 1] += pmover.tmpsink[i] * p.wei[i]
+        end
         
-        @. pmover.Φ += (pmover.C[idxk] * pmover.tmpcosk + pmover.S[idxk] * pmover.tmpsink) / k^2
+        pmover.Φ .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpcosk .+ pmover.S[pmover.K + k + 1] .* pmover.tmpsink) ./ Float64(k^2)
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        @. dst += (pmover.C[idxk] * pmover.tmpsink - pmover.S[idxk] .* pmover.tmpcosk) / k 
+        dst .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpsink .- pmover.S[pmover.K + k + 1] .* pmover.tmpcosk) ./ Float64(k)
     end
     
     dst ./= 2π
-    pmover.Φ .*= pmover.meshx.stop / (4π^2)
+    pmover.Φ .*= pmover.L #/ (4π^2)
 end
 
 function kernel_gyrokinetic!(dst, x, p, pmover)
@@ -262,17 +270,29 @@ end
     Returns the square of the electrical energy
 """
 function compute_electricalenergy²(pmover)
-    return sum((pmover.C[k+pmover.K+1].^2 .+ pmover.S[k+pmover.K+1].^2) / k^2 for k=-pmover.K:pmover.K if k != 0) * pmover.meshx.stop/(4π^2)
-    # return sum((pmover.C.^2 .+ pmover.S.^2) ./ (1:pmover.K).^2) * pmover.meshx.stop/(2π^2)
+    elec_e² = 0.0
+    for k=-pmover.K:pmover.K
+        (k == 0)&&continue
+        elec_e² += (pmover.C[pmover.K + 1 + k]^2 + pmover.S[pmover.K + 1 + k]^2) / k^2
+    end
+    return elec_e² * pmover.meshx.stop / (4π^2)
 end
 
 
 function compute_momentum(particles)
-    return sum(particles.wei .* particles.v)
+    mom = 0.0
+    for i = 1:particles.nbpart
+        mom += particles.v[i] * particles.wei[i]
+    end
+    return mom    
 end
 
 function compute_totalenergy²(particles, Eelec²)
-    return 1/2 * (Eelec² .+ sum(particles.v.^2 .* particles.wei))
+    kin_e² = 0.0
+    for i = 1:particles.nbpart
+        kin_e² += particles.v[i]^2 * particles.wei[i]
+    end
+    return 1/2 * (Eelec² + kin_e²)
 end
 
 
@@ -282,8 +302,12 @@ end
     Impose periodic boundary conditions in space.
 """
 function periodic_boundary_conditions!(p, pmover)
-    p.x[findall(>(pmover.meshx.stop), p.x)] .-= pmover.meshx.stop
-    p.x[findall(<(0)                , p.x)] .+= pmover.meshx.stop
+    for idx=eachindex(p.x)
+        (p.x[idx] > pmover.L)&&(p.x[idx] -= pmover.L)
+        (p.x[idx] < 0)&&(p.x[idx] += pmover.L) 
+    end
+    # p.x[findall(>(pmover.meshx.stop), p.x)] .-= pmover.meshx.stop
+    # p.x[findall(<(0)                , p.x)] .+= pmover.meshx.stop
 end
 
 
@@ -296,8 +320,22 @@ function WPM_step!(p::Particles, pmover::ParticleMover; kernel=kernel_poisson!)
     periodic_boundary_conditions!(p, pmover)
     
     E² = compute_electricalenergy²(pmover)
-    return E², compute_momentum(p), compute_totalenergy²(p, E²)
+    mom = compute_momentum(p)
+    Etot² = compute_totalenergy²(p, E²)
+    return E², mom, Etot²
 end
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 function PIC_step!(p, meshx, meshv, dt, dΦdx)
