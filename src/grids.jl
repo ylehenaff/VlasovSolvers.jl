@@ -1,19 +1,19 @@
 export OneDGrid
 
-struct OneDGrid
+struct OneDGrid{T<:Real}
 
     dev :: AbstractDevice
     len  :: Int
-    start :: Real
-    stop  :: Real
+    start :: T
+    stop  :: T
     points :: LinRange
-    step :: Real
+    step :: T
 
-    function OneDGrid( dev, len, start, stop )
+    function OneDGrid{T}( dev, len::Int, start::T, stop::T ) where T<:Real
 
         points = LinRange( start, stop, len+1 )[1:end-1]
         step = ( stop - start ) / len
-        new( dev, len, start, stop, points, step)
+        new(dev, len, start, stop, points, step)
 
     end
 

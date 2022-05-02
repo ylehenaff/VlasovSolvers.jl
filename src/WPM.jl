@@ -8,30 +8,30 @@ using LinearAlgebra
 
 
 """
-Describe meta particules, represented by a Dirac disbtibution in (x, v), with a weight (~a high) of wei
+Describe meta particules, represented by a Dirac distribution in (``x``, ``v``), with a weight ``wei``
 """
-struct Particles
-    x :: Vector{Float64}     # list of the positions
-    v :: Vector{Float64}     # list of the velocities
-    wei :: Vector{Float64}   # list of the weights of the particules
-    nbpart :: Int64          # nmber of particules
+struct Particles{T}
+    x :: Vector{T}     # list of the positions
+    v :: Vector{T}     # list of the velocities
+    wei :: Vector{T}   # list of the weights of the particules
+    nbpart :: Int          # nmber of particules
 end
 
 """
     Defines Runge-Kutta-Nystrom time integrator via its Butcher tableau,
     and holds some pre-allocated arrays used for the time integration only.
 """
-struct symplectic_rkn4
-    a ::    Array{Float64, 2}
-    b̄ ::    Vector{Float64}
-    c ::    Vector{Float64}
-    b ::    Vector{Float64}
-    dt ::   Float64
-    fg ::   Array{Float64, 2}
-    G ::    Array{Float64, 1}
-    nb_steps :: Int64
+struct symplectic_rkn4{T<:Real}
+    a ::    Array{T, 2}
+    b̄ ::    Vector{T}
+    c ::    Vector{T}
+    b ::    Vector{T}
+    dt ::   T
+    fg ::   Array{T, 2}
+    G ::    Array{T, 1}
+    nb_steps :: Int
 
-    function symplectic_rkn4(X, dt)
+    function symplectic_rkn4{T}(X, dt) where T<:Real
         # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
         a = [0.0        0.0         0.0; 
             (2-√3)/12   0.0         0.0; 
@@ -42,25 +42,25 @@ struct symplectic_rkn4
 
         stages = 3
         new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt, 
-            zeros(Float64, length(X), stages),  # fg
-            similar(X), # G
+            zeros(T, length(X), stages),  # fg
+            similar(X, T), # G
             stages # number of steps
         )
     end
 end
 
 
-struct rkn5
-    a :: Array{Float64, 2}
-    b̄ :: Vector{Float64}
-    c :: Vector{Float64}
-    b :: Vector{Float64}
-    dt :: Float64
-    fg :: Array{Float64, 2}
-    G ::  Array{Float64, 1}
-    nb_steps :: Int64
+struct rkn5{T<:Real}
+    a :: Array{T, 2}
+    b̄ :: Vector{T}
+    c :: Vector{T}
+    b :: Vector{T}
+    dt :: T
+    fg :: Array{T, 2}
+    G ::  Array{T, 1}
+    nb_steps :: Int
 
-    function rkn5(X, dt)
+    function rkn5{T}(X, dt) where T<:Real
         # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
         a = [0.0        0.0         0.0     0.0; 
             1/50        0.0         0.0     0.0; 
@@ -72,8 +72,8 @@ struct rkn5
 
         stages = 4
         new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt, 
-            zeros(Float64, length(X), stages),  # fg
-            similar(X), # G
+            zeros(T, length(X), stages),  # fg
+            similar(X, T), # G
             stages
         )
     end
@@ -83,28 +83,26 @@ end
 """
 Holds pre-allocated arrays
 """
-struct ParticleMover
-    Φ :: Vector{Float64}
-    ∂Φ :: Vector{Float64}
-    meshx :: OneDGrid
-    L :: Float64
-    kx :: Float64
-    K :: Int64
-    C :: Vector{Float64}
-    S :: Vector{Float64}
-    tmpcosk :: Vector{Float64}
-    tmpsink :: Vector{Float64}
-    tmpcoskimplicit :: Vector{Float64}
-    tmpsinkimplicit :: Vector{Float64}
-    poisson_matrix
-    ρ :: Vector{Float64}
-    Φ_grid :: Vector{Float64}
-    idxonmesh :: Vector{Int64}
-    idxonmeshp1 :: Vector{Int64}
-    rkn :: symplectic_rkn4
-    dt :: Float64
-    
-    function ParticleMover(particles::Particles, meshx, K, dt; kx=1)
+struct ParticleMover{T<:Real}
+    Φ :: Vector{T}
+    ∂Φ :: Vector{T}
+    meshx :: OneDGrid{T}
+    kx :: T
+    K :: Int
+    C :: Vector{T}
+    S :: Vector{T}
+    tmpcosk :: Vector{T}
+    tmpsink :: Vector{T}
+    poisson_matrix::SparseMatrixCSC{T, Int}
+    ρ :: Vector{T}
+    Φ_grid :: Vector{T}
+    idxonmesh :: Vector{Int}
+    idxonmeshp1 :: Vector{Int}
+    rkn :: symplectic_rkn4{T}
+    dt :: T
+    type
+
+    function ParticleMover{T}(particles::Particles, meshx, K, dt; kx=1) where T<:Real
         Φ = similar(particles.x)
         ∂Φ = similar(particles.x)
         tmpcosk = similar(particles.x)
@@ -112,29 +110,27 @@ struct ParticleMover
         nx = meshx.len
         np = particles.nbpart
 
-        matrix_poisson = spdiagm(  -1 => .- ones(Float64,nx-1),
-                                    0 => 2 .* ones(Float64,nx),
-                                    1 => .- ones(Float64,nx-1))
+        matrix_poisson = spdiagm(  -1 => .- ones(T, nx-1),
+                                    0 => 2 .* ones(T, nx),
+                                    1 => .- ones(T, nx-1))
         matrix_poisson[1, nx] = -1
         matrix_poisson[nx, 1] = -1
 
         matrix_poisson ./= meshx.step^2
 
 
-        new(Φ, ∂Φ, meshx, meshx.stop, kx, K, 
-                Vector{Float64}(undef, 2K+1),  #C
-                Vector{Float64}(undef, 2K+1), #S
+        new(Φ, ∂Φ, meshx, kx, K, 
+                Vector{T}(undef, 2K+1),  #C
+                Vector{T}(undef, 2K+1), #S
                 tmpcosk, tmpsink, 
-                similar(tmpcosk), #tmpcoskimplicit
-                similar(tmpsink), #tmpsinkimplicit
                 matrix_poisson, 
-                Vector{Float64}(undef, nx), #ρ
-                Vector{Float64}(undef, nx), #Φ_grid
-                Vector{Int64}(undef, np), #idxonmesh
-                Vector{Int64}(undef, np), #idxonmeshp1
-                symplectic_rkn4(particles.x, dt), # rkn
-                # rkn5(particles.x, dt),
-                dt)
+                Vector{T}(undef, nx), #ρ
+                Vector{T}(undef, nx), #Φ_grid
+                Vector{Int}(undef, np), #idxonmesh
+                Vector{Int}(undef, np), #idxonmeshp1
+                symplectic_rkn4{T}(particles.x, dt), # rkn
+                # rkn5{T}(particles.x, dt),
+                dt, T)
     end
 end
 
@@ -164,23 +160,23 @@ end
 """
 function RKN_timestepper!(p, pmover, kernel)
     @views begin
-        for s=1:pmover.rkn.nb_steps
-            @. pmover.rkn.G = p.x + p.v * pmover.rkn.c[s]
+        for s = 1:pmover.rkn.nb_steps
+            @. pmover.rkn.G = p.x + p.v * pmover.rkn.c[s];
 
             for ss = 1:pmover.rkn.nb_steps
-                @. pmover.rkn.G +=  pmover.rkn.a[s, ss] * pmover.rkn.fg[:, ss]
+                @. pmover.rkn.G +=  pmover.rkn.a[s, ss] * pmover.rkn.fg[:, ss];
             end
             
-            kernel(pmover.rkn.fg[:, s], pmover.rkn.G, p, pmover)
+            kernel(pmover.rkn.fg[:, s], pmover.rkn.G, p, pmover);
         end
     
-        @. p.x += pmover.dt * p.v
-        for ss=1:pmover.rkn.nb_steps
-            @. p.x += pmover.rkn.b̄[ss] * pmover.rkn.fg[:, ss]
-            @. p.v += pmover.rkn.b[ss] * pmover.rkn.fg[:, ss]
+        @. p.x += pmover.dt * p.v;
+        for s=eachindex(pmover.rkn.b̄)
+            @. p.x += pmover.rkn.b̄[s] * pmover.rkn.fg[:, s];
+            @. p.v += pmover.rkn.b[s] * pmover.rkn.fg[:, s];
         end
 
-        kernel(pmover.∂Φ, p.x, p, pmover)
+        kernel(pmover.∂Φ, p.x, p, pmover);
     end
 end
 
@@ -208,18 +204,6 @@ function strang_splitting!(particles, pmover, kernel)
     kernel(pmover.∂Φ, particles.x, particles, pmover)
 end
 
-function strang_splitting_implicit!(particles, pmover, kernel)  
-    pmover.Φ .= 0
-    pmover.∂Φ .= 0
-    κ = 1/2
-    kernel(pmover.∂Φ, particles.x, particles, pmover; coeffdt=κ)
-    @. particles.v += pmover.dt / 2 * pmover.∂Φ
-    @. particles.x += particles.v * pmover.dt
-    kernel(pmover.∂Φ, particles.x, particles, pmover; coeffdt=κ)
-    @. particles.v += pmover.dt / 2 * pmover.∂Φ
-    kernel(pmover.∂Φ, particles.x, particles, pmover)
-end
-
 
 # ===== Kernel computations ==== #
 """
@@ -235,8 +219,6 @@ function kernel_poisson!(dst, x, p, pmover)
     for k=-pmover.K:pmover.K
         (k == 0)&&continue
 
-        # idxk = pmover.K + k + 1
-
         @inbounds for i = eachindex(x)
             (pmover.tmpsink[i], pmover.tmpcosk[i]) = sincos(x[i] * k * pmover.kx)
         end
@@ -246,16 +228,16 @@ function kernel_poisson!(dst, x, p, pmover)
             pmover.S[pmover.K + k + 1] += pmover.tmpsink[i] * p.wei[i]
         end
         
-        pmover.Φ .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpcosk .+ pmover.S[pmover.K + k + 1] .* pmover.tmpsink) ./ Float64(k^2)
+        pmover.Φ .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpcosk .+ pmover.S[pmover.K + k + 1] .* pmover.tmpsink) ./ k^2
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        dst .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpsink .- pmover.S[pmover.K + k + 1] .* pmover.tmpcosk) ./ Float64(k)
+        dst .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpsink .- pmover.S[pmover.K + k + 1] .* pmover.tmpcosk) ./ k
     end
     
     dst ./= 2π
-    pmover.Φ .*= -pmover.L / (4π^2)
+    pmover.Φ .*= -pmover.meshx.stop / (4π^2)
 end
 
 function kernel_gyrokinetic!(dst, x, p, pmover)
@@ -303,11 +285,9 @@ end
 """
 function periodic_boundary_conditions!(p, pmover)
     for idx=eachindex(p.x)
-        (p.x[idx] > pmover.L)&&(p.x[idx] -= pmover.L)
-        (p.x[idx] < 0)&&(p.x[idx] += pmover.L) 
+        (p.x[idx] > pmover.meshx.stop)&&(p.x[idx] -= pmover.meshx.stop)
+        (p.x[idx] < 0)&&(p.x[idx] += pmover.meshx.stop) 
     end
-    # p.x[findall(>(pmover.meshx.stop), p.x)] .-= pmover.meshx.stop
-    # p.x[findall(<(0)                , p.x)] .+= pmover.meshx.stop
 end
 
 
@@ -346,7 +326,7 @@ function PIC_step!(p, meshx, meshv, dt, dΦdx)
     # We interpolate the derivative of the potential, defined on a grid, to obtain an approximation
     # of its value at each particle position.
 
-    idxonmesh = Int64.(fld.(p.x, meshx.step)) .+ 1
+    idxonmesh = Int.(fld.(p.x, meshx.step)) .+ 1
     t = (p.x .- (idxonmesh.-1) .* meshx.step) ./ meshx.step
     idxonmesh[findall(i -> i > meshx.len,  idxonmesh)] .-= meshx.len
     idxonmesh[findall(i -> i < 1               ,  idxonmesh)] .+= meshx.len
@@ -355,7 +335,7 @@ function PIC_step!(p, meshx, meshv, dt, dΦdx)
     p.v .-= dt ./ 2 .* (dΦdx[idxonmesh] .* (1 .- t) .+ dΦdx[idxonmeshp1] .* t)
 
     # for ipart = 1:p.nbpart
-    #     idxgridx = Int64(fld(p.x[ipart], meshx.step)) + 1
+    #     idxgridx = Int(fld(p.x[ipart], meshx.step)) + 1
     #     t = (p.x[ipart] - (idxgridx-1) * meshx.step) / meshx.step
     #     p.v[ipart] -= dt/2 * (dΦdx[idxgridx] * (1-t) + dΦdx[idxgridx < meshx.len ? idxgridx+1 : 1] * t)
     #     # # Periodic boundary conditions in velocity
@@ -367,7 +347,7 @@ function PIC_step!(p, meshx, meshv, dt, dΦdx)
     # end
     update_positions!(p, meshx, dt)
     # for ipart = 1:p.nbpart
-    #     idxgridx = Int64(fld(p.x[ipart], meshx.step)) + 1
+    #     idxgridx = Int(fld(p.x[ipart], meshx.step)) + 1
     #     t = (p.x[ipart] - (idxgridx-1) * meshx.step) / meshx.step
     #     p.v[ipart] -= dt/2 * (dΦdx[idxgridx] * (1-t) + dΦdx[idxgridx < meshx.len ? idxgridx+1 : 1] * t)
     #     # Periodic boundary conditions in velocity
@@ -378,7 +358,7 @@ function PIC_step!(p, meshx, meshv, dt, dΦdx)
     #     # end
     # end
 
-    idxonmesh .= Int64.(fld.(p.x, meshx.step)) .+ 1
+    idxonmesh .= Int.(fld.(p.x, meshx.step)) .+ 1
     t = (p.x .- (idxonmesh.-1) .* meshx.step) ./ meshx.step
     idxonmesh[findall(i -> i > meshx.len,  idxonmesh)] .-= meshx.len
     idxonmesh[findall(i -> i < 1               ,  idxonmesh)] .+= meshx.len
@@ -485,7 +465,7 @@ function compute_rho!(p, pmover)
     dx = pmover.meshx.step
     pmover.ρ .= 0.0
  
-    pmover.idxonmesh .= Int64.(fld.(p.x, dx)) .+ 1
+    pmover.idxonmesh .= Int.(fld.(p.x, dx)) .+ 1
     t = (p.x .- (pmover.idxonmesh.-1) .* dx) ./ dx
     
     pmover.idxonmesh[findall(i -> i > pmover.meshx.len,  pmover.idxonmesh)] .-= pmover.meshx.len
