@@ -255,7 +255,7 @@ function kernel_poisson!(dst, x, p, pmover)
     end
     
     dst ./= 2π
-    pmover.Φ .*= pmover.L #/ (4π^2)
+    pmover.Φ .*= -pmover.L / (4π^2)
 end
 
 function kernel_gyrokinetic!(dst, x, p, pmover)
