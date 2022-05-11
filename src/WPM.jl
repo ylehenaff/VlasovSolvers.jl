@@ -8,12 +8,12 @@ using LinearAlgebra
 
 
 """
-Describe meta particules, represented by a Dirac distribution in (``x``, ``v``), with a weight ``wei``
+Describe meta particules, represented by a Dirac distribution in (``x``, ``v``), with a weight ``β``
 """
 struct Particles{T}
     x :: Vector{T}     # list of the positions
     v :: Vector{T}     # list of the velocities
-    wei :: Vector{T}   # list of the weights of the particules
+    β :: Vector{T}   # list of the weights of the particules
     nbpart :: Int          # nmber of particules
 end
 
@@ -203,8 +203,8 @@ function kernel_poisson!(dst, x, p, pmover)
         end
         
         for i = 1:p.nbpart
-            pmover.C[pmover.K + k + 1] += pmover.tmpcosk[i] * p.wei[i]
-            pmover.S[pmover.K + k + 1] += pmover.tmpsink[i] * p.wei[i]
+            pmover.C[pmover.K + k + 1] += pmover.tmpcosk[i] * p.β[i]
+            pmover.S[pmover.K + k + 1] += pmover.tmpsink[i] * p.β[i]
         end
         
         pmover.Φ .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpcosk .+ pmover.S[pmover.K + k + 1] .* pmover.tmpsink) ./ k^2
@@ -243,7 +243,7 @@ end
 function compute_momentum(particles)
     mom = 0.0
     for i = 1:particles.nbpart
-        mom += particles.v[i] * particles.wei[i]
+        mom += particles.v[i] * particles.β[i]
     end
     return mom    
 end
@@ -251,7 +251,7 @@ end
 function compute_totalenergy²(particles, Eelec²)
     kin_e² = 0.0
     for i = 1:particles.nbpart
-        kin_e² += particles.v[i]^2 * particles.wei[i]
+        kin_e² += particles.v[i]^2 * particles.β[i]
     end
     return 1/2 * (Eelec² + kin_e²)
 end
