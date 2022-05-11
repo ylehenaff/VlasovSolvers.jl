@@ -93,11 +93,6 @@ struct ParticleMover{T<:Real}
     S :: Vector{T}
     tmpcosk :: Vector{T}
     tmpsink :: Vector{T}
-    poisson_matrix::SparseMatrixCSC{T, Int}
-    ρ :: Vector{T}
-    Φ_grid :: Vector{T}
-    idxonmesh :: Vector{Int}
-    idxonmeshp1 :: Vector{Int}
     rkn :: symplectic_rkn4{T}
     dt :: T
     type
@@ -107,27 +102,11 @@ struct ParticleMover{T<:Real}
         ∂Φ = similar(particles.x)
         tmpcosk = similar(particles.x)
         tmpsink = similar(particles.x)
-        nx = meshx.len
-        np = particles.nbpart
-
-        matrix_poisson = spdiagm(  -1 => .- ones(T, nx-1),
-                                    0 => 2 .* ones(T, nx),
-                                    1 => .- ones(T, nx-1))
-        matrix_poisson[1, nx] = -1
-        matrix_poisson[nx, 1] = -1
-
-        matrix_poisson ./= meshx.step^2
-
 
         new(Φ, ∂Φ, meshx, kx, K, 
                 Vector{T}(undef, 2K+1),  #C
                 Vector{T}(undef, 2K+1), #S
                 tmpcosk, tmpsink, 
-                matrix_poisson, 
-                Vector{T}(undef, nx), #ρ
-                Vector{T}(undef, nx), #Φ_grid
-                Vector{Int}(undef, np), #idxonmesh
-                Vector{Int}(undef, np), #idxonmeshp1
                 symplectic_rkn4{T}(particles.x, dt), # rkn
                 # rkn5{T}(particles.x, dt),
                 dt, T)
