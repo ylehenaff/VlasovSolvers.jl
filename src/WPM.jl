@@ -5,7 +5,7 @@ using Random
 using Distributions
 using SparseArrays
 using LinearAlgebra
-
+using InteractiveUtils # Import to use ``@code_warntype`` 
 
 """
 Describe meta particules, represented by a Dirac distribution in (``x``, ``v``), with a weight ``β``
@@ -87,6 +87,7 @@ struct ParticleMover{T<:Real}
     Φ :: Vector{T}
     ∂Φ :: Vector{T}
     meshx :: OneDGrid{T}
+    torus_size :: T
     kx :: T
     K :: Int
     C :: Vector{T}
@@ -103,7 +104,7 @@ struct ParticleMover{T<:Real}
         tmpcosk = similar(particles.x)
         tmpsink = similar(particles.x)
 
-        new(Φ, ∂Φ, meshx, kx, K, 
+        new(Φ, ∂Φ, meshx, meshx.stop, kx, K, 
                 Vector{T}(undef, 2K+1),  #C
                 Vector{T}(undef, 2K+1), #S
                 tmpcosk, tmpsink, 
@@ -195,28 +196,32 @@ function kernel_poisson!(dst, x, p, pmover)
     pmover.C .= 0
     pmover.S .= 0
 
-    for k=-pmover.K:pmover.K
-        (k == 0)&&continue
+    for idxk=eachindex(pmover.C) 
+        ξk = 2π .* (idxk .- (pmover.K+1)) ./ pmover.meshx.stop
+        normξk² = sum(ξk.^2)
+        (normξk² == 0 || sum(abs.(idxk .- (pmover.K+1))) > pmover.K)&&continue
 
         @inbounds for i = eachindex(x)
-            (pmover.tmpsink[i], pmover.tmpcosk[i]) = sincos(x[i] * k * pmover.kx)
+            # remplacer par ``dot(x[i], ξk)
+            (pmover.tmpsink[i], pmover.tmpcosk[i]) = sincos(x[i] * ξk)
         end
         
         for i = 1:p.nbpart
-            pmover.C[pmover.K + k + 1] += pmover.tmpcosk[i] * p.β[i]
-            pmover.S[pmover.K + k + 1] += pmover.tmpsink[i] * p.β[i]
+            pmover.C[idxk] += pmover.tmpcosk[i] * p.β[i]
+            pmover.S[idxk] += pmover.tmpsink[i] * p.β[i]
         end
         
-        pmover.Φ .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpcosk .+ pmover.S[pmover.K + k + 1] .* pmover.tmpsink) ./ k^2
+        pmover.Φ .-= (pmover.C[idxk] .* pmover.tmpcosk .+ pmover.S[idxk] .* pmover.tmpsink) ./ normξk²
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        dst .+= (pmover.C[pmover.K + k + 1] .* pmover.tmpsink .- pmover.S[pmover.K + k + 1] .* pmover.tmpcosk) ./ k
+        dst .+= (pmover.C[idxk] .* pmover.tmpsink .- pmover.S[idxk] .* pmover.tmpcosk) .* ξk ./ normξk²
+        # !!! Problème de dimension avec la ligne au-dessus en dimension > 1
     end
     
-    dst ./= 2π
-    pmover.Φ .*= -pmover.meshx.stop / (4π^2)
+    dst ./= pmover.torus_size
+    pmover.Φ ./= pmover.torus_size
 end
 
 function kernel_gyrokinetic!(dst, x, p, pmover)
@@ -232,11 +237,13 @@ end
 """
 function compute_electricalenergy²(pmover)
     elec_e² = 0.0
-    for k=-pmover.K:pmover.K
-        (k == 0)&&continue
-        elec_e² += (pmover.C[pmover.K + 1 + k]^2 + pmover.S[pmover.K + 1 + k]^2) / k^2
+    for idxk = eachindex(pmover.C) 
+        ξk = 2π .* (idxk .- (pmover.K+1)) ./ pmover.meshx.stop
+        normξk² = sum(ξk.^2)
+        (normξk² == 0 || sum(abs.(idxk .- (pmover.K+1))) > pmover.K)&&continue
+        elec_e² += (pmover.C[idxk]^2 + pmover.S[idxk]^2) / normξk²
     end
-    return elec_e² * pmover.meshx.stop / (4π^2)
+    return elec_e² / pmover.torus_size
 end
 
 
