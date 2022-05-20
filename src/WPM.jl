@@ -86,63 +86,43 @@ end
 """
 Holds pre-allocated arrays
 """
-struct ParticleMover{T<:Real}
+struct ParticleMover{T<:Real, DIM}
     Φ :: Array{T, 2}
     ∂Φ :: Array{T, 2}
     meshx :: OneDGrid{T}
     torus_size :: T
     kx :: T
     K :: Int
-    C :: Vector{T}
-    S :: Vector{T}
-    tmpcosk :: Array{T, 2}
-    tmpsink :: Array{T, 2}
+    C :: Array{T, DIM}
+    S :: Array{T, DIM}
+    tmpsinkcosk :: Array{T, 2}
     rkn :: symplectic_rkn4{T}
     dt :: T
     type
+    dim
 
-    function ParticleMover{T}(particles::Particles, meshx, K, dt; kx=1) where T<:Real
+    function ParticleMover{T, DIM}(particles::Particles, meshx, K, dt; kx=1) where {T<:Real, DIM}
         Φ = Array{T, 2}(undef, 2, particles.nbpart)
         ∂Φ = similar(particles.x)
-        tmpcosk = Array{T, 2}(undef, 1, particles.nbpart)
-        tmpsink = Array{T, 2}(undef, 1, particles.nbpart)
+        tmpsinkcosk = Array{T, 2}(undef, 2, particles.nbpart)
+        dim = size(particles.x)[1]
 
         new(Φ,
             ∂Φ,
             meshx, meshx.stop, kx, K, 
-            Vector{T}(undef, 2K+1), #C
-            Vector{T}(undef, 2K+1), #S
-            tmpcosk,
-            tmpsink,
+            Array{T, DIM}(undef, fill(2K+1, DIM)...), #C
+            Array{T, DIM}(undef, fill(2K+1, DIM)...), #S
+            tmpsinkcosk,
             symplectic_rkn4{T}(particles.x, dt), # rkn
             # rkn5{T}(particles.x, dt),
-            dt, T)
+            dt, T, DIM)
     end
 end
 
 
 
 #==== Time steppers ====#
-"""symplectic_RKN_order4!(X, V, F, rkn, kx)
-    
-    Advect (X, V) on a time step dt using symplectic Runge-Kutta-Nystrom method of order4 [Feng, Qin (2010), sect.7.3, p.327, scheme1].
-
-    The equation satisfied by X is
-    ```math
-    \\frac{d^2 X(t)}{dt^2} = C(t)\\cos(X(t)) - S(t)\\sin(X(t))
-    ```
-
-    RKN method considers Ẋ = V as a variable, and updates both X and V.
-
-    Args:
-    - X: matrix of positions at time t_n
-    - V: matrix of velocities at time t_n
-    - F: values of initial condition at time t_0
-    - rkn: rkn_order_4 struct, storing butcher tableau and pre-allocated arrays (holds the value of dt)
-    - kx: 2π/L
-
-    Updates X, V in place, and returns coefficients C, S at current time.
-
+"""RKN_timestepper!(p, pmover, kernel)
 """
 function RKN_timestepper!(p, pmover, kernel)
     @views begin
@@ -152,7 +132,7 @@ function RKN_timestepper!(p, pmover, kernel)
             for ss = 1:pmover.rkn.nb_steps
                 @. pmover.rkn.G +=  pmover.rkn.a[s, ss] * pmover.rkn.fg[ss];
             end
-            
+    
             kernel(pmover.rkn.fg[s], pmover.rkn.G, p, pmover);
         end
     
@@ -202,32 +182,34 @@ function kernel_poisson!(dst, x, p, pmover)
     pmover.C .= 0
     pmover.S .= 0
 
-    @views for idxk=eachindex(pmover.C) 
-        ξk = 2π .* (idxk .- (pmover.K+1)) ./ pmover.meshx.stop
+    @views for idxk = CartesianIndices(pmover.C)
+        k = idxk.I .- (pmover.K + 1)
+        ξk = k .* 2π ./ pmover.meshx.stop
         normξk² = sum(ξk.^2)
-        (normξk² == 0 || sum(abs.(idxk .- (pmover.K+1))) > pmover.K) && continue
+        (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
 
         for (idx, pos) = enumerate(eachcol(x))
-            pmover.tmpsink[1, idx] = sin(dot(pos, ξk))
-            pmover.tmpcosk[1, idx] = cos(dot(pos, ξk))
+            pmover.tmpsinkcosk[:, idx] .= sincos(dot(pos, ξk))
         end
         
         for i = 1:p.nbpart
-            pmover.C[idxk] += pmover.tmpcosk[1, i] * p.β[i]
-            pmover.S[idxk] += pmover.tmpsink[1, i] * p.β[i]
+            pmover.C[idxk] += pmover.tmpsinkcosk[2, i] * p.β[i]
+            pmover.S[idxk] += pmover.tmpsinkcosk[1, i] * p.β[i]
         end
-        
-        @. pmover.Φ -= (pmover.C[idxk] * pmover.tmpcosk + pmover.S[idxk] * pmover.tmpsink) / normξk²
+
+        @. pmover.Φ[1, :] -= (pmover.C[idxk] * pmover.tmpsinkcosk[2, :] + pmover.S[idxk] * pmover.tmpsinkcosk[1, :]) / normξk²
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        @. dst += (pmover.C[idxk] * pmover.tmpsink - pmover.S[idxk] * pmover.tmpcosk) * ξk / normξk²
+        @. dst[1, :] += (pmover.C[idxk] * pmover.tmpsinkcosk[1, :] - pmover.S[idxk] * pmover.tmpsinkcosk[2, :]) * ξk / normξk²
+        # /!\ Vérifier que les dimensions sont bonnes sur la ligne au-dessus en dimension > 1 /!\
     end
     
     dst ./= pmover.torus_size
     pmover.Φ ./= pmover.torus_size
 end
+
 
 function kernel_gyrokinetic!(dst, x, p, pmover)
     dst .= .-x
@@ -286,7 +268,7 @@ end
 
 
 
-function WPM_step!(p::Particles, pmover::ParticleMover; kernel=kernel_poisson!)
+function WPM_step!(p, pmover; kernel=kernel_poisson!)
     RKN_timestepper!(p, pmover, kernel)
     # strang_splitting!(p, pmover, kernel)
     # strang_splitting_implicit!(p, pmover, kernel)
