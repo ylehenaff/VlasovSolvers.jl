@@ -102,6 +102,8 @@ struct ParticleMover{T<:Real, DIM}
     C :: Array{T, DIM}
     S :: Array{T, DIM}
     tmpsinkcosk :: Array{T, 2}
+    Eelec²tot² :: Vector{T} # Holds Eelec² and Etot²
+    momentum :: Array{T, 1}
     rkn :: symplectic_rkn4{T}
     dt :: T
     type
@@ -119,6 +121,8 @@ struct ParticleMover{T<:Real, DIM}
             Array{T, DIM}(undef, fill(2K+1, DIM)...), #C
             Array{T, DIM}(undef, fill(2K+1, DIM)...), #S
             tmpsinkcosk,
+            zeros(T, 2), # Eelec²tot² (tuple)
+            similar(particles.v[:, 1]), # momentum
             symplectic_rkn4{T}(particles.x, dt), # rkn
             # rkn5{T}(particles.x, dt),
             dt, T, DIM)
@@ -130,7 +134,7 @@ end
 #==== Time steppers ====#
 """RKN_timestepper!(p, pmover, kernel)
 """
-function RKN_timestepper!(p, pmover, kernel)
+function RKN_timestepper!(p, pmover; kernel=kernel_poisson!)
     @views begin
         for s = 1:pmover.rkn.nb_steps
             @. pmover.rkn.G = p.x + p.v * pmover.rkn.c[s];
@@ -228,33 +232,30 @@ end
 
     Returns the square of the electrical energy
 """
-function compute_electricalenergy²(pmover)
-    elec_e² = 0.0
+function compute_electricalenergy²!(p, pmover)
+    pmover.Eelec²tot²[1] = 0.0
     for idxk = eachindex(pmover.C) 
         ξk = 2π .* (idxk .- (pmover.K+1)) ./ pmover.meshx.stop
         normξk² = sum(ξk.^2)
         (normξk² == 0 || sum(abs.(idxk .- (pmover.K+1))) > pmover.K)&&continue
-        elec_e² += (pmover.C[idxk]^2 + pmover.S[idxk]^2) / normξk²
+        pmover.Eelec²tot²[1] += (pmover.C[idxk]^2 + pmover.S[idxk]^2) / normξk²
     end
-    return elec_e² / pmover.torus_size
+    pmover.Eelec²tot²[1] /= pmover.torus_size;
 end
 
 
-function compute_momentum(particles)
-    mom = similar(@views particles.v[:, 1])
+function compute_momentum!(particles, pmover)
+    pmover.momentum .= zero(pmover.type)
     for (idv, vv) = enumerate(eachcol(particles.v))
-        mom .+= vv .* particles.β[idv]
+        pmover.momentum .+= vv .* particles.β[idv]
     end
-    return mom    
 end
 
-function compute_totalenergy²(particles, Eelec²)
-    kin_e² = 0.0
+function compute_totalenergy²!(particles, pmover)
+    pmover.Eelec²tot²[2] = zero(pmover.type)
     @views for (idv, vv) = enumerate(eachcol(particles.v))
-        kin_e² += sum(abs2, vv) * particles.β[idv]
-
+        pmover.Eelec²tot²[2] += sum(abs2, vv) * particles.β[idv]
     end
-    return 1/2 * (Eelec² + kin_e²)
 end
 
 
@@ -275,14 +276,16 @@ end
 
 
 function WPM_step!(p, pmover; kernel=kernel_poisson!)
-    RKN_timestepper!(p, pmover, kernel)
+    # @code_warntype RKN_timestepper!(p, pmover, kernel) # 2 allocs, 288b
+    @time RKN_timestepper!(p, pmover; kernel) # 2 allocs, 288b
     # strang_splitting!(p, pmover, kernel)
     # strang_splitting_implicit!(p, pmover, kernel)
     
     periodic_boundary_conditions!(p, pmover)
     
-    E² = compute_electricalenergy²(pmover)
-    mom = compute_momentum(p)
-    Etot² = compute_totalenergy²(p, E²)
-    return E², mom, Etot²
+    compute_momentum!(p, pmover) # 1 alloc, 64b
+    compute_electricalenergy²!(p, pmover)
+    compute_totalenergy²!(p, pmover)
+    
+    return nothing
 end
