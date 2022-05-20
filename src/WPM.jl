@@ -5,7 +5,7 @@ using Random
 using Distributions
 using SparseArrays
 using LinearAlgebra
-using InteractiveUtils # Import to use ``@code_warntype`` 
+# using InteractiveUtils # Import to use ``@code_warntype`` 
 
 
 
@@ -16,7 +16,13 @@ struct Particles{T}
     x :: Array{T, 2}    # list of the positions
     v :: Array{T, 2}    # list of the velocities
     β :: Vector{T}      # list of the weights of the particules
-    nbpart :: Int       # nmber of particules
+    nbpart :: Int       # number of particules
+    dim :: Int
+    type
+
+    function Particles{T}(x, v, β) where T<:Real
+        new(x, v, β, size(x)[2], size(x)[1], T)
+    end
 end
 
 """
