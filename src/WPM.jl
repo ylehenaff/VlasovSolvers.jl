@@ -212,7 +212,7 @@ function kernel_poisson!(dst, x, p, pmover)
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        @. dst[1, :] += (pmover.C[idxk] * pmover.tmpsinkcosk[1, :] - pmover.S[idxk] * pmover.tmpsinkcosk[2, :]) * ξk / normξk²
+        @. dst[1, :] += transpose(transpose(pmover.C[idxk] * pmover.tmpsinkcosk[1, :] - pmover.S[idxk] * pmover.tmpsinkcosk[2, :]) .* ξk) / normξk²
         # /!\ Vérifier que les dimensions sont bonnes sur la ligne au-dessus en dimension > 1 /!\
     end
     
@@ -277,7 +277,7 @@ end
 
 function WPM_step!(p, pmover; kernel=kernel_poisson!)
     # @code_warntype RKN_timestepper!(p, pmover, kernel) # 2 allocs, 288b
-    @time RKN_timestepper!(p, pmover; kernel) # 2 allocs, 288b
+    RKN_timestepper!(p, pmover; kernel) # 2 allocs, 288b
     # strang_splitting!(p, pmover, kernel)
     # strang_splitting_implicit!(p, pmover, kernel)
     
