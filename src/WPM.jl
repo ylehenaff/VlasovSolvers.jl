@@ -256,6 +256,8 @@ function compute_totalenergy²!(particles, pmover)
     @views for (idv, vv) = enumerate(eachcol(particles.v))
         pmover.Eelec²tot²[2] += sum(abs2, vv) * particles.β[idv]
     end
+    pmover.Eelec²tot²[2] += pmover.Eelec²tot²[1]
+    pmover.Eelec²tot²[2] /= 2
 end
 
 
