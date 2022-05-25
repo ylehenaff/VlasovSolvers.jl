@@ -198,7 +198,7 @@ function kernel_poisson!(dst, x, p, pmover)
         normξk² = sum(ξk.^2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
 
-        for (idx, pos) = enumerate(eachcol(x))
+        @inbounds for (idx, pos) = enumerate(eachcol(x))
             skck = sincos(dot(pos, ξk))
             pmover.tmpsinkcosk[:, idx] .= skck
             pmover.S[idxk] += skck[1] * p.β[idx]
