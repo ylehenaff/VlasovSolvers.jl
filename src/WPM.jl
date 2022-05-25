@@ -199,14 +199,12 @@ function kernel_poisson!(dst, x, p, pmover)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
 
         for (idx, pos) = enumerate(eachcol(x))
-            pmover.tmpsinkcosk[:, idx] .= sincos(dot(pos, ξk))
+            skck = sincos(dot(pos, ξk))
+            pmover.tmpsinkcosk[:, idx] .= skck
+            pmover.S[idxk] += skck[1] * p.β[idx]
+            pmover.C[idxk] += skck[2] * p.β[idx]
         end
         
-        for i = 1:p.nbpart
-            pmover.C[idxk] += pmover.tmpsinkcosk[2, i] * p.β[i]
-            pmover.S[idxk] += pmover.tmpsinkcosk[1, i] * p.β[i]
-        end
-
         @. pmover.Φ[1, :] -= (pmover.C[idxk] * pmover.tmpsinkcosk[2, :] + pmover.S[idxk] * pmover.tmpsinkcosk[1, :]) / normξk²
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
