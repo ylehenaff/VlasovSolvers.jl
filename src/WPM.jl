@@ -51,7 +51,7 @@ struct symplectic_rkn4{T<:Real}
         stages = 3
 
         new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt,
-            [similar(X) for _ = 1:stages],  # fg
+            [zeros(size(X)) for _ = 1:stages],  # fg
             similar(X), # G
             stages # number of steps
         )
@@ -205,15 +205,12 @@ function kernel_poisson!(dst, x, p, pmover)
             pmover.C[idxk] += skck[2] * p.β[idx]
         end
 
-        # transpose!(pmover.tmpsinkcoskᵗ, pmover.tmpsinkcosk)
-
         @. pmover.Φ -= pmover.C[idxk] * pmover.tmpsinkcosk[2, :] + pmover.S[idxk] * pmover.tmpsinkcosk[1, :] / normξk²
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
         @. dst += (pmover.C[idxk] * pmover.tmpsinkcosk[1, :]' - pmover.S[idxk] * pmover.tmpsinkcosk[2, :]') * ξk / normξk²
-        
     end
 
     dst ./= pmover.torus_size
@@ -243,7 +240,6 @@ function compute_electricalenergy²!(p, pmover)
     end
     pmover.Eelec²tot²[1] /= pmover.torus_size
 end
-
 
 function compute_momentum!(particles, pmover)
     pmover.momentum .= zero(pmover.type)
