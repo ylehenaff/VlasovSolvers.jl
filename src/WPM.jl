@@ -30,14 +30,14 @@ end
     and holds some pre-allocated arrays used for the time integration only.
 """
 struct symplectic_rkn4{T<:Real}
-    a :: Array{T,2}
-    b̄ :: Vector{T}
-    c :: Vector{T}
-    b :: Vector{T}
-    dt :: T
-    fg :: Array{Array{T,2},1}
-    G :: Array{T,2}
-    nb_steps :: Int
+    a::Array{T,2}
+    b̄::Vector{T}
+    c::Vector{T}
+    b::Vector{T}
+    dt::T
+    fg::Array{Array{T,2},1}
+    G::Array{T,2}
+    nb_steps::Int
 
     function symplectic_rkn4{T}(X, dt) where {T<:Real}
         # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
@@ -60,14 +60,14 @@ end
 
 
 struct rkn5{T<:Real}
-    a :: Array{T,2}
-    b̄ :: Vector{T}
-    c :: Vector{T}
-    b :: Vector{T}
-    dt :: T
-    fg :: Array{T,2}
-    G :: Array{T,1}
-    nb_steps :: Int
+    a::Array{T,2}
+    b̄::Vector{T}
+    c::Vector{T}
+    b::Vector{T}
+    dt::T
+    fg::Array{T,2}
+    G::Array{T,1}
+    nb_steps::Int
 
     function rkn5{T}(X, dt) where {T<:Real}
         # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
@@ -93,25 +93,25 @@ end
 Holds pre-allocated arrays
 """
 struct ParticleMover{T<:Real,DIM}
-    Φ :: Array{T,1}
-    ∂Φ :: Array{T,2}
-    torus :: Vector{T}
-    torus_size :: T
-    kxs :: Vector{T}
-    K :: Int
-    C :: Array{T,DIM}
-    S :: Array{T,DIM}
-    tmpsinkcosk :: Array{T,2}
-    tmpsinkcoskᵗ :: Array{T,2}
-    Eelec²tot² :: Vector{T} # Holds Eelec² and Etot²
-    momentum :: Array{T,1}
-    rkn :: symplectic_rkn4{T}
-    dt :: T
+    Φ::Array{T,1}
+    ∂Φ::Array{T,2}
+    torus::Vector{T}
+    torus_size::T
+    kxs::Vector{T}
+    K::Int
+    C::Array{T,DIM}
+    S::Array{T,DIM}
+    tmpsinkcosk::Array{T,2}
+    tmpsinkcoskᵗ::Array{T,2}
+    Eelec²tot²::Vector{T} # Holds Eelec² and Etot²
+    momentum::Array{T,1}
+    rkn::symplectic_rkn4{T}
+    dt::T
     type
     dim
 
     function ParticleMover{T,DIM}(particles::Particles, torus, K, dt) where {T<:Real,DIM}
-        Φ = Array{T, 1}(undef, particles.nbpart)
+        Φ = Array{T,1}(undef, particles.nbpart)
         ∂Φ = similar(particles.x)
         tmpsinkcosk = Array{T,2}(undef, 2, particles.nbpart)
         tmpsinkcoskᵗ = Array{T,2}(undef, particles.nbpart, 2)
@@ -189,8 +189,8 @@ function kernel_poisson!(dst, x, p, pmover)
     dst .= 0
     pmover.Φ .= 0
 
-    pmover.C .= 0
-    pmover.S .= 0
+    pmover.S .= zero(pmover.type)
+    pmover.C .= zero(pmover.type)
 
     @views for idxk = CartesianIndices(pmover.C)
         k = idxk.I .- (pmover.K+1)
@@ -198,21 +198,25 @@ function kernel_poisson!(dst, x, p, pmover)
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
 
-        @inbounds for (idx, pos) = enumerate(eachcol(x))
-            skck = sincos(dot(pos, ξk))
+        @inbounds for (idx, xcol) = enumerate(eachcol(x))
+            skck = sincos(dot(xcol, ξk))
             pmover.tmpsinkcosk[:, idx] .= skck
             pmover.S[idxk] += skck[1] * p.β[idx]
-            pmover.C[idxk] += skck[2] * p.β[idx]
+            pmover.C[idxk] += skck[2] * p.β[idx] 
         end
+    
+        transpose!(pmover.tmpsinkcoskᵗ, pmover.tmpsinkcosk)
 
-        @. pmover.Φ -= pmover.C[idxk] * pmover.tmpsinkcosk[2, :] + pmover.S[idxk] * pmover.tmpsinkcosk[1, :] / normξk²
+        @. pmover.Φ -= transpose(pmover.C[idxk] * pmover.tmpsinkcoskᵗ[:, 2] + pmover.S[idxk] * pmover.tmpsinkcoskᵗ[:, 1]) / normξk²
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        @. dst += (pmover.C[idxk] * pmover.tmpsinkcosk[1, :]' - pmover.S[idxk] * pmover.tmpsinkcosk[2, :]') * ξk / normξk²
+        @. dst += (pmover.C[idxk] * $reshape(pmover.tmpsinkcoskᵗ[:, 1], 1, p.nbpart) -
+                   pmover.S[idxk] * $reshape(pmover.tmpsinkcoskᵗ[:, 2], 1, p.nbpart)
+        ) * ξk / normξk²
     end
-
+    
     dst ./= pmover.torus_size
     pmover.Φ ./= pmover.torus_size
 end
@@ -232,11 +236,11 @@ end
 function compute_electricalenergy²!(p, pmover)
     pmover.Eelec²tot²[1] = 0.0
     @views for idxk = CartesianIndices(pmover.C)
-        k = idxk.I .- (pmover.K+1)
+        k = idxk.I .- (pmover.K + 1)
         ξk = k .* pmover.kxs
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
-        pmover.Eelec²tot²[1] += (pmover.C[idxk]^2 + pmover.S[idxk]^2) / normξk²
+        pmover.Eelec²tot²[1] += (pmover.C[idxk]^2 + pmover.S[idxk]^2 - pmover.C[idxk] * pmover.S[idxk]) / normξk²
     end
     pmover.Eelec²tot²[1] /= pmover.torus_size
 end
