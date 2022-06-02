@@ -180,12 +180,10 @@ end
     Updates X, V in place, and returns coefficients C, S at current time. 
 """
 function strang_splitting!(particles, pmover, kernel)
-    pmover.∂Φ .= 0
-    @. particles.x += particles.v * pmover.dt / 2
+    @. particles.v += pmover.∂Φ * pmover.dt / 2
+    @. particles.x += particles.v * pmover.dt
     kernel(pmover.∂Φ, particles.x, particles, pmover)
-    @. particles.v += pmover.dt * pmover.∂Φ
-    @. particles.x += particles.v * pmover.dt / 2
-    kernel(pmover.∂Φ, particles.x, particles, pmover)
+    @. particles.v += pmover.∂Φ * pmover.dt / 2
 end
 
 
@@ -224,35 +222,6 @@ function kernel_poisson!(dst, x, p, pmover)
     end
 
     dst ./= pmover.torus_size
-
-
-
-    # # Faire la NUFFT ici !
-    # #
-    # #
-    # if p.dim == 1
-    #     eps = 1e-12
-    #     xinrightinterval = x[1, :] .* 2π ./ pmover.torus[1] .- π
-
-    #     nufft1d1!(xinrightinterval,
-    #         p.complexcj,
-    #         -1,
-    #         eps,
-    #         pmover.fourier_coeffs)
-    #     pmover.fourier_coeffs .*= pmover.invks
-    #     pmover.Eelec²tot²[1] = sum(abs2.(pmover.fourier_coeffs))
-    #     # Estimate the electrical field at the arbitrary locations x
-    #     @time dst .= transpose(real.(nufft1d2(xinrightinterval,
-    #         +1,
-    #         eps,
-    #         pmover.fourier_coeffs))) .* pmover.torus[1] ./ 2π
-    # elseif p.dim == 2
-    #     ###
-    # elseif p.dim == 3
-    #     ###
-    # else
-    #     throw(DimensionMismatch("Only 1, 2 or 3 dimensions in space are supported."))
-    # end
 end
 
 
@@ -313,15 +282,13 @@ end
 
 
 function WPM_step!(p, pmover; kernel=kernel_poisson!)
-    # @code_warntype RKN_timestepper!(p, pmover, kernel) # 2 allocs, 288b
-    RKN_timestepper!(p, pmover; kernel) # 2 allocs, 288b
+    RKN_timestepper!(p, pmover; kernel)
     # strang_splitting!(p, pmover, kernel)
-    # strang_splitting_implicit!(p, pmover, kernel)
 
     periodic_boundary_conditions!(p, pmover)
 
-    compute_momentum!(p, pmover) # 1 alloc, 64b
-    # compute_electricalenergy²!(p, pmover)
+    compute_momentum!(p, pmover)
+    compute_electricalenergy²!(p, pmover)
     compute_totalenergy²!(p, pmover)
 
     return nothing
