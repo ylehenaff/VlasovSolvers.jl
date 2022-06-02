@@ -93,7 +93,6 @@ end
 Holds pre-allocated arrays
 """
 struct ParticleMover{T<:Real,DIM}
-    Φ::Array{T,1}
     ∂Φ::Array{T,2}
     torus::Vector{T}
     torus_size::T
@@ -111,13 +110,11 @@ struct ParticleMover{T<:Real,DIM}
     dim
 
     function ParticleMover{T,DIM}(particles::Particles, torus, K, dt) where {T<:Real,DIM}
-        Φ = Array{T,1}(undef, particles.nbpart)
         ∂Φ = similar(particles.x)
         tmpsinkcosk = Array{T,2}(undef, 2, particles.nbpart)
         tmpsinkcoskᵗ = Array{T,2}(undef, particles.nbpart, 2)
 
-        new(Φ,
-            ∂Φ,
+        new(∂Φ,
             convert.(T, torus), convert(T, *(torus...)), convert.(T, 2π ./ torus), K,
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #C
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #S
@@ -171,7 +168,6 @@ end
     Updates X, V in place, and returns coefficients C, S at current time. 
 """
 function strang_splitting!(particles, pmover, kernel)
-    pmover.Φ .= 0
     pmover.∂Φ .= 0
     @. particles.x += particles.v * pmover.dt / 2
     kernel(pmover.∂Φ, particles.x, particles, pmover)
@@ -183,11 +179,10 @@ end
 
 # ===== Kernel computations ==== #
 """
-Compute -∂_x Φ[f](`x`) and stores it in `dst`. Also updates `pmover.Φ`
+Compute -∂_x Φ[f](`x`) and stores it in `dst`.
 """
 function kernel_poisson!(dst, x, p, pmover)
     dst .= 0
-    pmover.Φ .= 0
 
     pmover.S .= zero(pmover.type)
     pmover.C .= zero(pmover.type)
@@ -204,10 +199,9 @@ function kernel_poisson!(dst, x, p, pmover)
             pmover.S[idxk] += skck[1] * p.β[idx]
             pmover.C[idxk] += skck[2] * p.β[idx] 
         end
-    
+
         transpose!(pmover.tmpsinkcoskᵗ, pmover.tmpsinkcosk)
 
-        @. pmover.Φ -= transpose(pmover.C[idxk] * pmover.tmpsinkcoskᵗ[:, 2] + pmover.S[idxk] * pmover.tmpsinkcoskᵗ[:, 1]) / normξk²
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
@@ -216,9 +210,8 @@ function kernel_poisson!(dst, x, p, pmover)
                    pmover.S[idxk] * $reshape(pmover.tmpsinkcoskᵗ[:, 2], 1, p.nbpart)
         ) * ξk / normξk²
     end
-    
+
     dst ./= pmover.torus_size
-    pmover.Φ ./= pmover.torus_size
 end
 
 
