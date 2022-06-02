@@ -5,6 +5,7 @@ using Random
 using Distributions
 using SparseArrays
 using LinearAlgebra
+using FINUFFT
 # using InteractiveUtils # Import to use ``@code_warntype`` 
 
 
@@ -16,12 +17,13 @@ struct Particles{T}
     x::Array{T,2}    # list of the positions
     v::Array{T,2}    # list of the velocities
     β::Vector{T}      # list of the weights of the particules
+    complexcj :: Vector{ComplexF64}
     nbpart::Int       # number of particules
     dim::Int
     type
 
     function Particles{T}(x, v, β) where {T<:Real}
-        new(x, v, β, size(x)[2], size(x)[1], T)
+        new(x, v, β, similar(β, ComplexF64), size(x)[2], size(x)[1], T)
     end
 end
 
@@ -60,32 +62,32 @@ end
 
 
 struct rkn5{T<:Real}
-    a::Array{T,2}
-    b̄::Vector{T}
-    c::Vector{T}
-    b::Vector{T}
-    dt::T
-    fg::Array{T,2}
-    G::Array{T,1}
-    nb_steps::Int
+    # a::Array{T,2}
+    # b̄::Vector{T}
+    # c::Vector{T}
+    # b::Vector{T}
+    # dt::T
+    # fg::Array{T,2}
+    # G::Array{T,1}
+    # nb_steps::Int
 
-    function rkn5{T}(X, dt) where {T<:Real}
-        # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
-        a = [0.0 0.0 0.0 0.0
-            1/50 0.0 0.0 0.0
-            -1/27 7/27 0.0 0.0
-            3/10 -2/35 9/35 0.0]
-        b̄ = [14 / 336, 100 / 336, 54 / 336, 0.0]
-        c = [0, 1 / 5, 2 / 3, 1.0]
-        b = [14 / 336, 125 / 336, 162 / 336, 35 / 336]
+    # function rkn5{T}(X, dt) where {T<:Real}
+    #     # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
+    #     a = [0.0 0.0 0.0 0.0
+    #         1/50 0.0 0.0 0.0
+    #         -1/27 7/27 0.0 0.0
+    #         3/10 -2/35 9/35 0.0]
+    #     b̄ = [14 / 336, 100 / 336, 54 / 336, 0.0]
+    #     c = [0, 1 / 5, 2 / 3, 1.0]
+    #     b = [14 / 336, 125 / 336, 162 / 336, 35 / 336]
 
-        stages = 4
-        new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt,
-            zeros(T, length(X), stages),  # fg
-            similar(X, T), # G
-            stages
-        )
-    end
+    #     stages = 4
+    #     new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt,
+    #         zeros(T, length(X), stages),  # fg
+    #         similar(X, T), # G
+    #         stages
+    #     )
+    # end
 end
 
 
@@ -97,9 +99,11 @@ struct ParticleMover{T<:Real,DIM}
     torus::Vector{T}
     torus_size::T
     kxs::Vector{T}
+    invks :: Vector{ComplexF64}
     K::Int
     C::Array{T,DIM}
     S::Array{T,DIM}
+    fourier_coeffs :: Array{ComplexF64, 1}
     tmpsinkcosk::Array{T,2}
     tmpsinkcoskᵗ::Array{T,2}
     Eelec²tot²::Vector{T} # Holds Eelec² and Etot²
@@ -114,10 +118,18 @@ struct ParticleMover{T<:Real,DIM}
         tmpsinkcosk = Array{T,2}(undef, 2, particles.nbpart)
         tmpsinkcoskᵗ = Array{T,2}(undef, particles.nbpart, 2)
 
+        ks = collect(-K:K) .* 2π ./ torus[1]
+        ks[K+1] = 1
+        invks = convert.(ComplexF64, 1 ./ ks)
+        invks[K+1] = zero(ComplexF64)
+
+        particles.complexcj .= convert.(ComplexF64, particles.β ./ torus[1])
+
         new(∂Φ,
-            convert.(T, torus), convert(T, *(torus...)), convert.(T, 2π ./ torus), K,
+            convert.(T, torus), convert(T, *(torus...)), convert.(T, 2π ./ torus), invks, K,
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #C
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #S
+            zeros(ComplexF64, 2K+1), # fourier_coeffs
             tmpsinkcosk, tmpsinkcoskᵗ,
             zeros(T, 2), # Eelec²tot² (tuple)
             similar(particles.v[:, 1]), # momentum
@@ -182,22 +194,22 @@ end
 Compute -∂_x Φ[f](`x`) and stores it in `dst`.
 """
 function kernel_poisson!(dst, x, p, pmover)
-    dst .= 0
+    dst .= zero(pmover.type)
 
     pmover.S .= zero(pmover.type)
     pmover.C .= zero(pmover.type)
 
     @views for idxk = CartesianIndices(pmover.C)
-        k = idxk.I .- (pmover.K+1)
+        k = idxk.I .- (pmover.K + 1)
         ξk = k .* pmover.kxs
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
-
+        
         @inbounds for (idx, xcol) = enumerate(eachcol(x))
             skck = sincos(dot(xcol, ξk))
             pmover.tmpsinkcosk[:, idx] .= skck
             pmover.S[idxk] += skck[1] * p.β[idx]
-            pmover.C[idxk] += skck[2] * p.β[idx] 
+            pmover.C[idxk] += skck[2] * p.β[idx]
         end
 
         transpose!(pmover.tmpsinkcoskᵗ, pmover.tmpsinkcosk)
@@ -212,6 +224,35 @@ function kernel_poisson!(dst, x, p, pmover)
     end
 
     dst ./= pmover.torus_size
+
+
+
+    # # Faire la NUFFT ici !
+    # #
+    # #
+    # if p.dim == 1
+    #     eps = 1e-12
+    #     xinrightinterval = x[1, :] .* 2π ./ pmover.torus[1] .- π
+
+    #     nufft1d1!(xinrightinterval,
+    #         p.complexcj,
+    #         -1,
+    #         eps,
+    #         pmover.fourier_coeffs)
+    #     pmover.fourier_coeffs .*= pmover.invks
+    #     pmover.Eelec²tot²[1] = sum(abs2.(pmover.fourier_coeffs))
+    #     # Estimate the electrical field at the arbitrary locations x
+    #     @time dst .= transpose(real.(nufft1d2(xinrightinterval,
+    #         +1,
+    #         eps,
+    #         pmover.fourier_coeffs))) .* pmover.torus[1] ./ 2π
+    # elseif p.dim == 2
+    #     ###
+    # elseif p.dim == 3
+    #     ###
+    # else
+    #     throw(DimensionMismatch("Only 1, 2 or 3 dimensions in space are supported."))
+    # end
 end
 
 
@@ -280,7 +321,7 @@ function WPM_step!(p, pmover; kernel=kernel_poisson!)
     periodic_boundary_conditions!(p, pmover)
 
     compute_momentum!(p, pmover) # 1 alloc, 64b
-    compute_electricalenergy²!(p, pmover)
+    # compute_electricalenergy²!(p, pmover)
     compute_totalenergy²!(p, pmover)
 
     return nothing
