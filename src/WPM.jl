@@ -150,7 +150,7 @@ function RKN_timestepper!(p, pmover; kernel=kernel_poisson!)
             @. p.v += pmover.rkn.b[s] * pmover.rkn.fg[s]
         end
 
-        kernel(pmover.∂Φ, p.x, p, pmover)
+        kernel(pmover.∂Φ, p.x, p, pmover) # only useful to update C, S with new positions
     end
 end
 
@@ -218,6 +218,26 @@ function kernel_gyrokinetic!(dst, x, p, pmover)
     @. dst = -x
 end
 
+function kernel_freestreaming!(dst, x, p, pmover)
+    dst .= zero(pmover.type)
+
+    pmover.S .= zero(pmover.type)
+    pmover.C .= zero(pmover.type)
+
+    @views for idxk = CartesianIndices(pmover.C)
+        k = idxk.I .- (pmover.K + 1)
+        ξk = k .* pmover.kxs
+        normξk² = sum(ξk .^ 2)
+        (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
+        
+        @inbounds for (idx, xcol) = enumerate(eachcol(x))
+            skck = sincospi(dot(xcol, ξk) / π)
+            pmover.tmpsinkcosk[:, idx] .= skck
+            pmover.S[idxk] += skck[1] * p.β[idx]
+            pmover.C[idxk] += skck[2] * p.β[idx]
+        end
+    end
+end
 
 
 # ===== Some quantities we can compute at each step ==== #
