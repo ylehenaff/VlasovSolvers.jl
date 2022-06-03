@@ -17,13 +17,12 @@ struct Particles{T}
     x::Array{T,2}    # list of the positions
     v::Array{T,2}    # list of the velocities
     β::Vector{T}      # list of the weights of the particules
-    complexcj :: Vector{ComplexF64}
     nbpart::Int       # number of particules
     dim::Int
     type
 
     function Particles{T}(x, v, β) where {T<:Real}
-        new(x, v, β, similar(β, ComplexF64), size(x)[2], size(x)[1], T)
+        new(x, v, β, size(x)[2], size(x)[1], T)
     end
 end
 
@@ -194,7 +193,7 @@ function kernel_poisson!(dst, x, p, pmover)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
         
         @inbounds for (idx, xcol) = enumerate(eachcol(x))
-            skck = sincos(dot(xcol, ξk))
+            skck = sincospi(dot(xcol, ξk) / π)
             pmover.tmpsinkcosk[:, idx] .= skck
             pmover.S[idxk] += skck[1] * p.β[idx]
             pmover.C[idxk] += skck[2] * p.β[idx]
