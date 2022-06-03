@@ -5,7 +5,7 @@ using Random
 using Distributions
 using SparseArrays
 using LinearAlgebra
-using FINUFFT
+# using LoopVectorization # I did ``export JULIA_NUM_THREADS=auto`` in the terminal (not Julia REPL)
 # using InteractiveUtils # Import to use ``@code_warntype`` 
 
 
@@ -99,11 +99,9 @@ struct ParticleMover{T<:Real,DIM}
     torus::Vector{T}
     torus_size::T
     kxs::Vector{T}
-    invks :: Vector{ComplexF64}
     K::Int
     C::Array{T,DIM}
     S::Array{T,DIM}
-    fourier_coeffs :: Array{ComplexF64, 1}
     tmpsinkcosk::Array{T,2}
     tmpsinkcoskᵗ::Array{T,2}
     Eelec²tot²::Vector{T} # Holds Eelec² and Etot²
@@ -118,18 +116,10 @@ struct ParticleMover{T<:Real,DIM}
         tmpsinkcosk = Array{T,2}(undef, 2, particles.nbpart)
         tmpsinkcoskᵗ = Array{T,2}(undef, particles.nbpart, 2)
 
-        ks = collect(-K:K) .* 2π ./ torus[1]
-        ks[K+1] = 1
-        invks = convert.(ComplexF64, 1 ./ ks)
-        invks[K+1] = zero(ComplexF64)
-
-        particles.complexcj .= convert.(ComplexF64, particles.β ./ torus[1])
-
         new(∂Φ,
-            convert.(T, torus), convert(T, *(torus...)), convert.(T, 2π ./ torus), invks, K,
+            convert.(T, torus), convert(T, *(torus...)), convert.(T, 2π ./ torus), K,
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #C
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #S
-            zeros(ComplexF64, 2K+1), # fourier_coeffs
             tmpsinkcosk, tmpsinkcoskᵗ,
             zeros(T, 2), # Eelec²tot² (tuple)
             similar(particles.v[:, 1]), # momentum
@@ -243,7 +233,7 @@ function compute_electricalenergy²!(p, pmover)
         ξk = k .* pmover.kxs
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
-        pmover.Eelec²tot²[1] += (pmover.C[idxk]^2 + pmover.S[idxk]^2 - pmover.C[idxk] * pmover.S[idxk]) / normξk²
+        pmover.Eelec²tot²[1] += (pmover.C[idxk]^2 + pmover.S[idxk]^2) / normξk²
     end
     pmover.Eelec²tot²[1] /= pmover.torus_size
 end
