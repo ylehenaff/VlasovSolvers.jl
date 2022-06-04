@@ -193,7 +193,7 @@ function kernel_poisson!(dst, x, p, pmover)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
         
         @inbounds for (idx, xcol) = enumerate(eachcol(x))
-            skck = sincospi(dot(xcol, ξk) / π)
+            skck = sincos(dot(xcol, ξk))
             pmover.tmpsinkcosk[:, idx] .= skck
             pmover.S[idxk] += skck[1] * p.β[idx]
             pmover.C[idxk] += skck[2] * p.β[idx]
@@ -231,7 +231,7 @@ function kernel_freestreaming!(dst, x, p, pmover)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
         
         @inbounds for (idx, xcol) = enumerate(eachcol(x))
-            skck = sincospi(dot(xcol, ξk) / π)
+            skck = sincos(dot(xcol, ξk))
             pmover.tmpsinkcosk[:, idx] .= skck
             pmover.S[idxk] += skck[1] * p.β[idx]
             pmover.C[idxk] += skck[2] * p.β[idx]
