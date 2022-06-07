@@ -183,21 +183,18 @@ Compute -∂_x Φ[f](`x`) and stores it in `dst`.
 function kernel_poisson!(dst, x, p, pmover)
     dst .= zero(pmover.type)
 
-    pmover.S .= zero(pmover.type)
-    pmover.C .= zero(pmover.type)
+    pmover.S .= zero(p.type)
+    pmover.C .= zero(p.type)
 
     @views for idxk = CartesianIndices(pmover.C)
         k = idxk.I .- (pmover.K + 1)
         ξk = k .* pmover.kxs
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
-        
-        @inbounds for (idx, xcol) = enumerate(eachcol(x))
-            skck = sincos(dot(xcol, ξk))
-            pmover.tmpsinkcosk[:, idx] .= skck
-            pmover.S[idxk] += skck[1] * p.β[idx]
-            pmover.C[idxk] += skck[2] * p.β[idx]
-        end
+
+        skck = compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, x, ξk, p.β)
+        pmover.S[idxk] = skck[1]
+        pmover.C[idxk] = skck[2]
 
         transpose!(pmover.tmpsinkcoskᵗ, pmover.tmpsinkcosk)
 
@@ -211,6 +208,19 @@ function kernel_poisson!(dst, x, p, pmover)
     end
 
     dst ./= pmover.torus_size
+end
+#
+#
+function compute_Sₖ_Cₖ!(tmpsinkcosk, x, ξ, β)
+    S = 0.
+    C = 0.
+    @inbounds for (idx, xcol) = enumerate(eachcol(x))
+        skck = sincos(dot(xcol, ξ))
+        tmpsinkcosk[:, idx] .= skck
+        S += skck[1] * β[idx]
+        C += skck[2] * β[idx]
+    end
+    return S, C
 end
 
 
