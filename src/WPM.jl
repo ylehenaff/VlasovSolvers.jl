@@ -101,8 +101,8 @@ struct ParticleMover{T<:Real,DIM}
     K::Int
     C::Array{T,DIM}
     S::Array{T,DIM}
+    computedyet::BitArray{DIM}
     tmpsinkcosk::Array{T,2}
-    tmpsinkcoskᵗ::Array{T,2}
     Eelec²tot²::Vector{T} # Holds Eelec² and Etot²
     momentum::Array{T,1}
     rkn::symplectic_rkn4{T}
@@ -119,7 +119,8 @@ struct ParticleMover{T<:Real,DIM}
             convert.(T, torus), convert(T, *(torus...)), convert.(T, 2π ./ torus), K,
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #C
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #S
-            tmpsinkcosk, tmpsinkcoskᵗ,
+            BitArray{DIM}(undef, fill(2K + 1, DIM)...), # computedyet
+            tmpsinkcosk,
             zeros(T, 2), # Eelec²tot² (tuple)
             similar(particles.v[:, 1]), # momentum
             symplectic_rkn4{T}(particles.x, dt), # rkn
@@ -185,26 +186,39 @@ function kernel_poisson!(dst, x, p, pmover)
 
     pmover.S .= zero(p.type)
     pmover.C .= zero(p.type)
+    pmover.computedyet .= false
 
     @views for idxk = CartesianIndices(pmover.C)
         k = idxk.I .- (pmover.K + 1)
         ξk = k .* pmover.kxs
         normξk² = sum(ξk .^ 2)
-        (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
+        if (normξk² == 0) || (sum(abs.(k)) > pmover.K)
+            pmover.computedyet[idxk] = true
+        end
+        pmover.computedyet[idxk] && continue
+
+        idxminusk = CartesianIndex(.-k .+ (pmover.K + 1))
 
         skck = compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, x, ξk, p.β)
+        pmover.computedyet[idxk] = true
+        pmover.computedyet[idxminusk] = true
         pmover.S[idxk] = skck[1]
+        pmover.S[idxminusk] = -skck[1]
         pmover.C[idxk] = skck[2]
-
-        transpose!(pmover.tmpsinkcoskᵗ, pmover.tmpsinkcosk)
+        pmover.C[idxminusk] = skck[2]
 
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        @. dst += (pmover.C[idxk] * $reshape(pmover.tmpsinkcoskᵗ[:, 1], 1, p.nbpart) -
-                   pmover.S[idxk] * $reshape(pmover.tmpsinkcoskᵗ[:, 2], 1, p.nbpart)
-        ) * ξk / normξk²
+        for ij = 1:size(dst)[2]
+            for ix = 1:size(dst)[1]
+                @inbounds dst[ix, ij] += (pmover.C[idxk] * pmover.tmpsinkcosk[1, ij] -
+                                          pmover.S[idxk] * pmover.tmpsinkcosk[2, ij]) * ξk[ix] / normξk²
+                @inbounds dst[ix, ij] += (pmover.C[idxminusk] * (-pmover.tmpsinkcosk[1, ij]) -
+                                          pmover.S[idxminusk] * pmover.tmpsinkcosk[2, ij]) * (-ξk[ix]) / normξk²
+            end
+        end
     end
 
     dst ./= pmover.torus_size
@@ -212,8 +226,8 @@ end
 #
 #
 function compute_Sₖ_Cₖ!(tmpsinkcosk, x, ξ, β)
-    S = 0.
-    C = 0.
+    S = 0.0
+    C = 0.0
     @inbounds for (idx, xcol) = enumerate(eachcol(x))
         skck = sincos(dot(xcol, ξ))
         tmpsinkcosk[:, idx] .= skck
@@ -239,7 +253,7 @@ function kernel_freestreaming!(dst, x, p, pmover)
         ξk = k .* pmover.kxs
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
-        
+
         @inbounds for (idx, xcol) = enumerate(eachcol(x))
             skck = sincos(dot(xcol, ξk))
             pmover.tmpsinkcosk[:, idx] .= skck
