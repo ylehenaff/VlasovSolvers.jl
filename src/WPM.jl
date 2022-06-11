@@ -170,10 +170,11 @@ end
     Updates X, V in place, and returns coefficients C, S at current time. 
 """
 function strang_splitting!(particles, pmover, kernel)
-    @. particles.v += pmover.∂Φ * pmover.dt / 2
-    @. particles.x += particles.v * pmover.dt
+    @. particles.x += particles.v * pmover.dt / 2
     kernel(pmover.∂Φ, particles.x, particles, pmover)
-    @. particles.v += pmover.∂Φ * pmover.dt / 2
+    @. particles.v += pmover.∂Φ * pmover.dt
+    @. particles.x += particles.v * pmover.dt / 2
+    kernel(pmover.∂Φ, particles.x, particles, pmover)
 end
 
 
@@ -228,11 +229,11 @@ end
 function compute_Sₖ_Cₖ!(tmpsinkcosk, x, ξ, β)
     S = 0.0
     C = 0.0
-    @inbounds for (idx, xcol) = enumerate(eachcol(x))
+    for (idx, xcol) = enumerate(eachcol(x))
         skck = sincos(dot(xcol, ξ))
-        tmpsinkcosk[:, idx] .= skck
-        S += skck[1] * β[idx]
-        C += skck[2] * β[idx]
+        @inbounds tmpsinkcosk[:, idx] .= skck
+        @inbounds S += skck[1] * β[idx]
+        @inbounds C += skck[2] * β[idx]
     end
     return S, C
 end
@@ -241,6 +242,7 @@ end
 function kernel_gyrokinetic!(dst, x, p, pmover)
     @. dst = -x
 end
+
 
 function kernel_freestreaming!(dst, x, p, pmover)
     dst .= zero(pmover.type)
@@ -254,11 +256,11 @@ function kernel_freestreaming!(dst, x, p, pmover)
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
 
-        @inbounds for (idx, xcol) = enumerate(eachcol(x))
+        for (idx, xcol) = enumerate(eachcol(x))
             skck = sincos(dot(xcol, ξk))
-            pmover.tmpsinkcosk[:, idx] .= skck
-            pmover.S[idxk] += skck[1] * p.β[idx]
-            pmover.C[idxk] += skck[2] * p.β[idx]
+            @inbounds pmover.tmpsinkcosk[:, idx] .= skck
+            @inbounds pmover.S[idxk] += skck[1] * p.β[idx]
+            @inbounds pmover.C[idxk] += skck[2] * p.β[idx]
         end
     end
 end
