@@ -212,12 +212,12 @@ function kernel_poisson!(dst, x, p, pmover)
         # Changing dynamics : 
         #   "+=": repulsive potential (plasmas dynamics)
         #   "-=": attractive potential (galaxies dynamics)
-        for ij = 1:size(dst)[2]
-            for ix = 1:size(dst)[1]
-                @inbounds dst[ix, ij] += (pmover.C[idxk] * pmover.tmpsinkcosk[1, ij] -
-                                          pmover.S[idxk] * pmover.tmpsinkcosk[2, ij]) * ξk[ix] / normξk²
-                @inbounds dst[ix, ij] += (pmover.C[idxminusk] * (-pmover.tmpsinkcosk[1, ij]) -
-                                          pmover.S[idxminusk] * pmover.tmpsinkcosk[2, ij]) * (-ξk[ix]) / normξk²
+        for pcol = 1:size(dst)[2]
+            for prow = 1:size(dst)[1]
+                @inbounds dst[prow, pcol] += (pmover.C[idxk] * pmover.tmpsinkcosk[1, pcol] -
+                                          pmover.S[idxk] * pmover.tmpsinkcosk[2, pcol]) * ξk[prow] / normξk²
+                @inbounds dst[prow, pcol] += (pmover.C[idxminusk] * (-pmover.tmpsinkcosk[1, pcol]) -
+                                          pmover.S[idxminusk] * pmover.tmpsinkcosk[2, pcol]) * (-ξk[prow]) / normξk²
             end
         end
     end
