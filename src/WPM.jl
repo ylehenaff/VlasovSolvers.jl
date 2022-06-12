@@ -200,13 +200,11 @@ function kernel_poisson!(dst, x, p, pmover)
 
         idxminusk = CartesianIndex(.-k .+ (pmover.K + 1))
 
-        skck = compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, x, ξk, p.β)
+        compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, pmover.S[idxk], pmover.C[idxk], x, ξk, p.β)
         pmover.computedyet[idxk] = true
         pmover.computedyet[idxminusk] = true
-        pmover.S[idxk] = skck[1]
-        pmover.S[idxminusk] = -skck[1]
-        pmover.C[idxk] = skck[2]
-        pmover.C[idxminusk] = skck[2]
+        pmover.S[idxminusk] = -pmover.S[idxk]
+        pmover.C[idxminusk] = pmover.C[idxk]
 
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
@@ -226,16 +224,13 @@ function kernel_poisson!(dst, x, p, pmover)
 end
 #
 #
-function compute_Sₖ_Cₖ!(tmpsinkcosk, x, ξ, β)
-    S = 0.0
-    C = 0.0
+function compute_Sₖ_Cₖ!(tmpsinkcosk, S, C, x, ξ, β)
     for (idx, xcol) = enumerate(eachcol(x))
         skck = sincos(dot(xcol, ξ))
         @inbounds tmpsinkcosk[:, idx] .= skck
         @inbounds S += skck[1] * β[idx]
         @inbounds C += skck[2] * β[idx]
     end
-    return S, C
 end
 
 
