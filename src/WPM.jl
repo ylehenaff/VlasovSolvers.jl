@@ -278,7 +278,7 @@ function compute_electricalenergy²!(p, pmover)
         ξk = k .* pmover.kxs
         normξk² = sum(ξk .^ 2)
         (normξk² == 0 || sum(abs.(k)) > pmover.K) && continue
-        pmover.Eelec²tot²[1] += (pmover.C[idxk]^2 + pmover.S[idxk]^2) / normξk²
+        @inbounds pmover.Eelec²tot²[1] += (pmover.C[idxk]^2 + pmover.S[idxk]^2) / normξk²
     end
     pmover.Eelec²tot²[1] /= pmover.torus_size
 end
@@ -286,14 +286,14 @@ end
 function compute_momentum!(particles, pmover)
     pmover.momentum .= zero(pmover.type)
     for (idv, vv) = enumerate(eachcol(particles.v))
-        pmover.momentum .+= vv .* particles.β[idv]
+        @inbounds pmover.momentum .+= vv .* particles.β[idv]
     end
 end
 
 function compute_totalenergy²!(particles, pmover)
     pmover.Eelec²tot²[2] = zero(pmover.type)
     @views for (idv, vv) = enumerate(eachcol(particles.v))
-        pmover.Eelec²tot²[2] += sum(abs2, vv) * particles.β[idv]
+        @inbounds pmover.Eelec²tot²[2] += sum(abs2, vv) * particles.β[idv]
     end
     pmover.Eelec²tot²[2] += pmover.Eelec²tot²[1]
     pmover.Eelec²tot²[2] /= 2
@@ -306,10 +306,10 @@ end
     Impose periodic boundary conditions in space.
 """
 function periodic_boundary_conditions!(p, pmover)
-    @views for idx = 1:p.nbpart
-        for d = 1:length(p.x[:, 1])
-            (p.x[d, idx] > pmover.torus[d]) && (p.x[d, idx] -= pmover.torus[d])
-            (p.x[d, idx] < 0) && (p.x[d, idx] += pmover.torus[d])
+    @views for idp = 1:p.nbpart
+        for d = 1:p.dim
+            @inbounds (p.x[d, idp] > pmover.torus[d]) && (p.x[d, idp] -= pmover.torus[d])
+            @inbounds (p.x[d, idp] < 0) && (p.x[d, idp] += pmover.torus[d])
         end
     end
 end
