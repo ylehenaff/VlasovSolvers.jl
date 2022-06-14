@@ -170,12 +170,12 @@ end
     Updates X, V in place, and returns coefficients C, S at current time. 
 """
 function strang_splitting!(particles, pmover, kernel)
-    @. particles.x += particles.v * pmover.dt / 2
+    @. particles.v += pmover.∂Φ * pmover.dt / 2
+    @. particles.x += particles.v * pmover.dt
     kernel(pmover.∂Φ, particles.x, particles, pmover)
-    @. particles.v += pmover.∂Φ * pmover.dt
-    @. particles.x += particles.v * pmover.dt / 2
-    kernel(pmover.∂Φ, particles.x, particles, pmover)
+    @. particles.v += pmover.∂Φ * pmover.dt / 2
 end
+
 
 
 # ===== Kernel computations ==== #
@@ -200,11 +200,13 @@ function kernel_poisson!(dst, x, p, pmover)
 
         idxminusk = CartesianIndex(.-k .+ (pmover.K + 1))
 
-        compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, pmover.S[idxk], pmover.C[idxk], x, ξk, p.β)
+        skck = compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, x, ξk, p.β)
         pmover.computedyet[idxk] = true
         pmover.computedyet[idxminusk] = true
-        pmover.S[idxminusk] = -pmover.S[idxk]
-        pmover.C[idxminusk] = pmover.C[idxk]
+        pmover.S[idxk] = skck[1]
+        pmover.S[idxminusk] = -skck[1]
+        pmover.C[idxk] = skck[2]
+        pmover.C[idxminusk] = skck[2]
 
         # The line below computes -∂Φ[f](`x`) and stores it to `dst`. 
         # Changing dynamics : 
@@ -212,10 +214,8 @@ function kernel_poisson!(dst, x, p, pmover)
         #   "-=": attractive potential (galaxies dynamics)
         for pcol = 1:size(dst)[2]
             for prow = 1:size(dst)[1]
-                @inbounds dst[prow, pcol] += (pmover.C[idxk] * pmover.tmpsinkcosk[1, pcol] -
+                @inbounds dst[prow, pcol] += 2 * (pmover.C[idxk] * pmover.tmpsinkcosk[1, pcol] -
                                           pmover.S[idxk] * pmover.tmpsinkcosk[2, pcol]) * ξk[prow] / normξk²
-                @inbounds dst[prow, pcol] += (pmover.C[idxminusk] * (-pmover.tmpsinkcosk[1, pcol]) -
-                                          pmover.S[idxminusk] * pmover.tmpsinkcosk[2, pcol]) * (-ξk[prow]) / normξk²
             end
         end
     end
@@ -224,13 +224,16 @@ function kernel_poisson!(dst, x, p, pmover)
 end
 #
 #
-function compute_Sₖ_Cₖ!(tmpsinkcosk, S, C, x, ξ, β)
+function compute_Sₖ_Cₖ!(tmpsinkcosk, x, ξ, β)
+    S = 0.0
+    C = 0.0
     for (idx, xcol) = enumerate(eachcol(x))
         skck = sincos(dot(xcol, ξ))
         @inbounds tmpsinkcosk[:, idx] .= skck
         @inbounds S += skck[1] * β[idx]
         @inbounds C += skck[2] * β[idx]
     end
+    return S, C
 end
 
 
