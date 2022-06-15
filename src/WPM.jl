@@ -169,11 +169,43 @@ end
 
     Updates X, V in place, and returns coefficients C, S at current time. 
 """
-function strang_splitting!(particles, pmover, kernel)
-    @. particles.v += pmover.∂Φ * pmover.dt / 2
-    @. particles.x += particles.v * pmover.dt
-    kernel(pmover.∂Φ, particles.x, particles, pmover)
-    @. particles.v += pmover.∂Φ * pmover.dt / 2
+function splitting!(particles, pmover, kernel; order=2)
+    if order==2
+        @. particles.v += pmover.∂Φ * pmover.dt / 2
+        @. particles.x += particles.v * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * pmover.dt / 2
+    elseif order==6
+        w1 = -0.117767998417887E1
+        w2 = 0.235573213359537E0
+        w3 = 0.784513610477560E0
+        w0 = 1 - 2(w1+w2+w3)
+        # A step of second order splitting
+        @. particles.v += pmover.∂Φ * w3 * pmover.dt / 2
+        @. particles.x += particles.v * w3 * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * (w3+w2) * pmover.dt / 2
+        @. particles.x += particles.v * w2 * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * (w2+w1) * pmover.dt / 2
+        @. particles.x += particles.v * w1 * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * (w0+w1) * pmover.dt / 2
+        @. particles.x += particles.v * w0 * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * (w0+w1) * pmover.dt / 2
+        @. particles.x += particles.v * w1 * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * (w2+w1) * pmover.dt / 2
+        @. particles.x += particles.v * w2 * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * (w3+w2) * pmover.dt / 2
+        @. particles.x += particles.v * w3 * pmover.dt
+        kernel(pmover.∂Φ, particles.x, particles, pmover)
+        @. particles.v += pmover.∂Φ * w3 * pmover.dt / 2
+    else
+        throw(ArgumentError("The argument ``order'' can be either 2 or 6."))
+    end
 end
 
 
@@ -316,7 +348,7 @@ end
 
 function WPM_step!(p, pmover; kernel=kernel_poisson!)
     RKN_timestepper!(p, pmover; kernel)
-    # strang_splitting!(p, pmover, kernel)
+    # splitting!(p, pmover, kernel, order=6)
 
     periodic_boundary_conditions!(p, pmover)
 
