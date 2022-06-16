@@ -215,83 +215,6 @@ end
 """
 Compute -∂_x Φ[f](`x`) and stores it in `dst`.
 """
-
-function kernel_poisson_nufft!(dst, x, p, pmover)
-    ###
-    # Works only in 1D for now
-    ###
-    nbfouriermodestotal = 65
-    nbfouriermodes = 2pmover.K + 1
-    ε = 1e-12
-
-    for idp = 1:p.nbpart
-        for d = 1:p.dim
-            x[d, idp] >= pmover.torus[d] ? while (x[d, idp] >= pmover.torus[d])
-                x[d, idp] -= pmover.torus[d]
-            end : nothing
-            x[d, idp] < 0 ? while (x[d, idp] < 0)
-                x[d, idp] += pmover.torus[d]
-            end : nothing
-        end
-    end
-
-    L = pmover.torus[1]
-    fourier_coeffs_∂rho = nufft1d1(2π ./ L .* x[1, :] .- π,
-        convert.(ComplexF64, p.β .* L ./ 2π),
-        -1,
-        ε,
-        nbfouriermodestotal
-    ) ./ pmover.torus[1]
-
-    # Prepare to divide by -k^2
-    invks = -(nbfouriermodestotal - 1)/2:(nbfouriermodestotal-1)/2 |> collect
-    invks[Int64((nbfouriermodestotal - 1) / 2 + 1)] = 1
-    invks = 1 ./ invks
-    idxzero = Int64((nbfouriermodestotal - 1) / 2 + 1)
-    invks[idxzero] = 0
-    idxminusK = idxzero - pmover.K
-    idxK = idxzero + pmover.K
-    invks[begin:(idxminusK-1)] .= 0
-    invks[(idxK+1):end] .= 0
-
-    # Divide fourier coefficients by k^2
-    fourier_coeffs_rho = fourier_coeffs_∂rho .* invks
-
-    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation
-    approx_rho = nufft1d2(2π ./ L .* x[1, :] .- π,
-        1,
-        ε,
-        fourier_coeffs_rho
-    )
-
-    for k = 0:(nbfouriermodes-1)/2
-        idxk = Int64(k + (nbfouriermodes - 1) / 2 + 1)
-        idxminusk = Int64(-k + (nbfouriermodes - 1) / 2 + 1)
-        ck, sk = reim(fourier_coeffs_∂rho[idxk])
-        pmover.S[idxk] = sk
-        pmover.S[idxminusk] = -sk
-        pmover.C[idxk] = ck
-        pmover.C[idxminusk] = ck
-
-    end
-
-    dst .+= imag.(approx_rho')
-
-    # @views for idxk = CartesianIndices(pmover.C)
-    #     k = idxk.I .- (pmover.K + 1)
-    #     k[1] < 0 ? continue : nothing
-    #     ξk = k .* pmover.kxs
-    #     normξk² = sum(ξk .^ 2)
-    #     if (normξk² == 0) || (sum(abs.(k)) > pmover.K)
-    #         pmover.computedyet[idxk] = true
-    #     end
-
-    #     skck = compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, x, ξk, p.β)
-    #     pmover.S[idxk] = skck[1]
-    #     pmover.C[idxk] = skck[2]
-    # end
-end
-
 function kernel_poisson!(dst, x, p, pmover)
     dst .= zero(pmover.type)
 
@@ -372,6 +295,67 @@ function kernel_freestreaming!(dst, x, p, pmover)
         end
     end
 end
+
+
+function kernel_poisson_nufft!(dst, x, p, pmover)
+    ###
+    # Works only in 1D for now
+    ###
+    nbfouriermodes = 2pmover.K + 1
+    ε = 1e-12
+
+    for idp = 1:p.nbpart
+        for d = 1:p.dim
+            x[d, idp] >= pmover.torus[d] ? while (x[d, idp] >= pmover.torus[d])
+                x[d, idp] -= pmover.torus[d]
+            end : nothing
+            x[d, idp] < 0 ? while (x[d, idp] < 0)
+                x[d, idp] += pmover.torus[d]
+            end : nothing
+        end
+    end
+
+    L = pmover.torus[1]
+    fourier_coeffs_∂rho = nufft1d1(2π ./ L .* x[1, :] .- π,
+        convert.(ComplexF64, p.β .* L ./ 2π),
+        -1,
+        ε,
+        nbfouriermodes
+    ) ./ pmover.torus[1]
+
+    # Prepare to divide by -k^2
+    invks = -(nbfouriermodes - 1)/2:(nbfouriermodes-1)/2 |> collect
+    invks[Int64((nbfouriermodes - 1) / 2 + 1)] = 1
+    invks = 1 ./ invks
+    idxzero = Int64((nbfouriermodes - 1) / 2 + 1)
+    invks[idxzero] = 0
+    invks ./= 2π/L
+    
+    # Divide fourier coefficients by k^2
+    fourier_coeffs_rho = fourier_coeffs_∂rho .* invks
+
+    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation
+    approx_rho = nufft1d2(2π ./ L .* x[1, :] .- π,
+        1,
+        ε,
+        fourier_coeffs_rho
+    )
+
+    for k = 0:(nbfouriermodes-1)/2
+        idxk = Int64(k + (nbfouriermodes - 1) / 2 + 1)
+        idxminusk = Int64(-k + (nbfouriermodes - 1) / 2 + 1)
+        ck, sk = reim(fourier_coeffs_∂rho[idxk])
+        pmover.S[idxk] = sk
+        pmover.S[idxminusk] = -sk
+        pmover.C[idxk] = ck
+        pmover.C[idxminusk] = ck
+
+    end
+
+    dst .= imag.(approx_rho')
+end
+
+
 
 
 # ===== Some quantities we can compute at each step ==== #
