@@ -5,6 +5,7 @@ using Random
 using Distributions
 using SparseArrays
 using LinearAlgebra
+using FINUFFT
 # using LoopVectorization # I did ``export JULIA_NUM_THREADS=auto`` in the terminal (not Julia REPL)
 # using InteractiveUtils # Import to use ``@code_warntype`` 
 
@@ -170,36 +171,36 @@ end
     Updates X, V in place, and returns coefficients C, S at current time. 
 """
 function splitting!(particles, pmover, kernel; order=2)
-    if order==2
+    if order == 2
         @. particles.v += pmover.∂Φ * pmover.dt / 2
         @. particles.x += particles.v * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
         @. particles.v += pmover.∂Φ * pmover.dt / 2
-    elseif order==6
+    elseif order == 6
         w1 = -0.117767998417887E1
         w2 = 0.235573213359537E0
         w3 = 0.784513610477560E0
-        w0 = 1 - 2(w1+w2+w3)
+        w0 = 1 - 2(w1 + w2 + w3)
         # A step of second order splitting
         @. particles.v += pmover.∂Φ * w3 * pmover.dt / 2
         @. particles.x += particles.v * w3 * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
-        @. particles.v += pmover.∂Φ * (w3+w2) * pmover.dt / 2
+        @. particles.v += pmover.∂Φ * (w3 + w2) * pmover.dt / 2
         @. particles.x += particles.v * w2 * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
-        @. particles.v += pmover.∂Φ * (w2+w1) * pmover.dt / 2
+        @. particles.v += pmover.∂Φ * (w2 + w1) * pmover.dt / 2
         @. particles.x += particles.v * w1 * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
-        @. particles.v += pmover.∂Φ * (w0+w1) * pmover.dt / 2
+        @. particles.v += pmover.∂Φ * (w0 + w1) * pmover.dt / 2
         @. particles.x += particles.v * w0 * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
-        @. particles.v += pmover.∂Φ * (w0+w1) * pmover.dt / 2
+        @. particles.v += pmover.∂Φ * (w0 + w1) * pmover.dt / 2
         @. particles.x += particles.v * w1 * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
-        @. particles.v += pmover.∂Φ * (w2+w1) * pmover.dt / 2
+        @. particles.v += pmover.∂Φ * (w2 + w1) * pmover.dt / 2
         @. particles.x += particles.v * w2 * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
-        @. particles.v += pmover.∂Φ * (w3+w2) * pmover.dt / 2
+        @. particles.v += pmover.∂Φ * (w3 + w2) * pmover.dt / 2
         @. particles.x += particles.v * w3 * pmover.dt
         kernel(pmover.∂Φ, particles.x, particles, pmover)
         @. particles.v += pmover.∂Φ * w3 * pmover.dt / 2
@@ -214,6 +215,83 @@ end
 """
 Compute -∂_x Φ[f](`x`) and stores it in `dst`.
 """
+
+function kernel_poisson_nufft!(dst, x, p, pmover)
+    ###
+    # Works only in 1D for now
+    ###
+    nbfouriermodestotal = 65
+    nbfouriermodes = 2pmover.K + 1
+    ε = 1e-12
+
+    for idp = 1:p.nbpart
+        for d = 1:p.dim
+            x[d, idp] >= pmover.torus[d] ? while (x[d, idp] >= pmover.torus[d])
+                x[d, idp] -= pmover.torus[d]
+            end : nothing
+            x[d, idp] < 0 ? while (x[d, idp] < 0)
+                x[d, idp] += pmover.torus[d]
+            end : nothing
+        end
+    end
+
+    L = pmover.torus[1]
+    fourier_coeffs_∂rho = nufft1d1(2π ./ L .* x[1, :] .- π,
+        convert.(ComplexF64, p.β .* L ./ 2π),
+        -1,
+        ε,
+        nbfouriermodestotal
+    ) ./ pmover.torus[1]
+
+    # Prepare to divide by -k^2
+    invks = -(nbfouriermodestotal - 1)/2:(nbfouriermodestotal-1)/2 |> collect
+    invks[Int64((nbfouriermodestotal - 1) / 2 + 1)] = 1
+    invks = 1 ./ invks
+    idxzero = Int64((nbfouriermodestotal - 1) / 2 + 1)
+    invks[idxzero] = 0
+    idxminusK = idxzero - pmover.K
+    idxK = idxzero + pmover.K
+    invks[begin:(idxminusK-1)] .= 0
+    invks[(idxK+1):end] .= 0
+
+    # Divide fourier coefficients by k^2
+    fourier_coeffs_rho = fourier_coeffs_∂rho .* invks
+
+    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation
+    approx_rho = nufft1d2(2π ./ L .* x[1, :] .- π,
+        1,
+        ε,
+        fourier_coeffs_rho
+    )
+
+    for k = 0:(nbfouriermodes-1)/2
+        idxk = Int64(k + (nbfouriermodes - 1) / 2 + 1)
+        idxminusk = Int64(-k + (nbfouriermodes - 1) / 2 + 1)
+        ck, sk = reim(fourier_coeffs_∂rho[idxk])
+        pmover.S[idxk] = sk
+        pmover.S[idxminusk] = -sk
+        pmover.C[idxk] = ck
+        pmover.C[idxminusk] = ck
+
+    end
+
+    dst .+= imag.(approx_rho')
+
+    # @views for idxk = CartesianIndices(pmover.C)
+    #     k = idxk.I .- (pmover.K + 1)
+    #     k[1] < 0 ? continue : nothing
+    #     ξk = k .* pmover.kxs
+    #     normξk² = sum(ξk .^ 2)
+    #     if (normξk² == 0) || (sum(abs.(k)) > pmover.K)
+    #         pmover.computedyet[idxk] = true
+    #     end
+
+    #     skck = compute_Sₖ_Cₖ!(pmover.tmpsinkcosk, x, ξk, p.β)
+    #     pmover.S[idxk] = skck[1]
+    #     pmover.C[idxk] = skck[2]
+    # end
+end
+
 function kernel_poisson!(dst, x, p, pmover)
     dst .= zero(pmover.type)
 
@@ -247,7 +325,7 @@ function kernel_poisson!(dst, x, p, pmover)
         for pcol = 1:size(dst)[2]
             for prow = 1:size(dst)[1]
                 @inbounds dst[prow, pcol] += 2 * (pmover.C[idxk] * pmover.tmpsinkcosk[1, pcol] -
-                                          pmover.S[idxk] * pmover.tmpsinkcosk[2, pcol]) * ξk[prow] / normξk²
+                                                  pmover.S[idxk] * pmover.tmpsinkcosk[2, pcol]) * ξk[prow] / normξk²
             end
         end
     end
@@ -336,10 +414,19 @@ end
     Impose periodic boundary conditions in space.
 """
 function periodic_boundary_conditions!(p, pmover)
-    @views for idp = 1:p.nbpart
-        for d = 1:p.dim
-            @inbounds (p.x[d, idp] > pmover.torus[d]) && (p.x[d, idp] -= pmover.torus[d])
-            @inbounds (p.x[d, idp] < 0) && (p.x[d, idp] += pmover.torus[d])
+    @inbounds begin
+        @views for idp = 1:p.nbpart
+            for d = 1:p.dim
+                if p.x[d, idp] >= pmover.torus[d]
+                    while p.x[d, idp] >= pmover.torus[d]
+                        p.x[d, idp] -= pmover.torus[d]
+                    end
+                elseif p.x[d, idp] < 0
+                    while p.x[d, idp] < 0
+                        p.x[d, idp] += pmover.torus[d]
+                    end
+                end
+            end
         end
     end
 end
@@ -348,7 +435,7 @@ end
 
 function WPM_step!(p, pmover; kernel=kernel_poisson!)
     RKN_timestepper!(p, pmover; kernel)
-    # splitting!(p, pmover, kernel, order=6)
+    # splitting!(p, pmover, kernel, order=2) # order=2 or 6
 
     periodic_boundary_conditions!(p, pmover)
 
