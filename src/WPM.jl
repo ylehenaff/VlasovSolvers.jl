@@ -61,33 +61,63 @@ struct symplectic_rkn4{T<:Real}
 end
 
 
+struct rkn4{T<:Real}
+    a::Array{T,2}
+    b̄::Vector{T}
+    c::Vector{T}
+    b::Vector{T}
+    dt::T
+    fg::Array{Array{T,2},1}
+    G::Array{T,2}
+    nb_steps::Int
+
+    function rkn4{T}(X, dt) where {T<:Real}
+        # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
+        a = [0.0 0.0 0.0
+            1/8 0.0 0.0
+            0.0 1/2 0.0]
+        b̄ = [1 / 6, 1 / 3, 0]
+        c = [0, 1 / 2, 1]
+        b = [1 / 6, 4 / 6, 1 / 6]
+
+        stages = 3
+
+        new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt,
+            [zeros(size(X)) for _ = 1:stages],  # fg
+            similar(X), # G
+            stages # number of steps
+        )
+    end
+end
+
+
 struct rkn5{T<:Real}
-    # a::Array{T,2}
-    # b̄::Vector{T}
-    # c::Vector{T}
-    # b::Vector{T}
-    # dt::T
-    # fg::Array{T,2}
-    # G::Array{T,1}
-    # nb_steps::Int
+    a::Array{T,2}
+    b̄::Vector{T}
+    c::Vector{T}
+    b::Vector{T}
+    dt::T
+    fg::Array{Array{T,2},1}
+    G::Array{T,2}
+    nb_steps::Int
 
-    # function rkn5{T}(X, dt) where {T<:Real}
-    #     # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
-    #     a = [0.0 0.0 0.0 0.0
-    #         1/50 0.0 0.0 0.0
-    #         -1/27 7/27 0.0 0.0
-    #         3/10 -2/35 9/35 0.0]
-    #     b̄ = [14 / 336, 100 / 336, 54 / 336, 0.0]
-    #     c = [0, 1 / 5, 2 / 3, 1.0]
-    #     b = [14 / 336, 125 / 336, 162 / 336, 35 / 336]
+    function rkn5{T}(X, dt) where {T<:Real}
+        # a, b̄, c, b correspond to the Butcher tableau of Runge-Kutta-Nystrom 3steps order4.
+        a = [0.0 0.0 0.0 0.0
+            1/50 0.0 0.0 0.0
+            -1/27 7/27 0.0 0.0
+            3/10 -2/35 9/35 0.0]
+        b̄ = [14 / 336, 100 / 336, 54 / 336, 0.0]
+        c = [0, 1 / 5, 2 / 3, 1.0]
+        b = [14 / 336, 125 / 336, 162 / 336, 35 / 336]
 
-    #     stages = 4
-    #     new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt,
-    #         zeros(T, length(X), stages),  # fg
-    #         similar(X, T), # G
-    #         stages
-    #     )
-    # end
+        stages = 4
+        new(a .* dt^2, b̄ .* dt^2, c .* dt, b .* dt, dt,
+            [zeros(size(X)) for _ = 1:stages],  # fg
+            similar(X), # G
+            stages # number of steps
+        )
+    end
 end
 
 
@@ -104,17 +134,37 @@ struct ParticleMover{T<:Real,DIM}
     S::Array{T,DIM}
     computedyet::BitArray{DIM}
     tmpsinkcosk::Array{T,2}
+    # Vérifier les dimensions :
+    nbfouriermodes::Int64
+    fourier_coeffs_∂rho::Array{ComplexF64, 1}
+    approx_rho::Array{ComplexF64, 1}
+    invks::Array{ComplexF64, 1}
+    ###########################
     Eelec²tot²::Vector{T} # Holds Eelec² and Etot²
     momentum::Array{T,1}
     rkn::symplectic_rkn4{T}
     dt::T
     type
-    dim
+    dim :: Int64
 
     function ParticleMover{T,DIM}(particles::Particles, torus, K, dt) where {T<:Real,DIM}
         ∂Φ = similar(particles.x)
         tmpsinkcosk = Array{T,2}(undef, 2, particles.nbpart)
         tmpsinkcoskᵗ = Array{T,2}(undef, particles.nbpart, 2)
+
+        # Only works in 1D for now
+        nbfouriermodes = 2K+1
+        fourier_coeffs_∂rho = Array{ComplexF64, 1}(undef, nbfouriermodes)
+        approx_rho = Array{ComplexF64, 1}(undef, particles.nbpart)
+        # Prepare to divide by 2πk/L to compute ∇ Δ^{-1}ρ
+        invks = Vector{ComplexF64}(undef, nbfouriermodes)
+        invks .= -(nbfouriermodes - 1)/2:(nbfouriermodes-1)/2
+        invks[Int64((nbfouriermodes - 1) / 2 + 1)] = 1
+        invks .*= 2π / torus[1]
+        invks = 1im * invks ./ invks .^ 2
+        idxzero = Int64((nbfouriermodes - 1) / 2 + 1)
+        invks[idxzero] = 0
+        ##########################
 
         new(∂Φ,
             convert.(T, torus), convert(T, *(torus...)), convert.(T, 2π ./ torus), K,
@@ -122,9 +172,11 @@ struct ParticleMover{T<:Real,DIM}
             Array{T,DIM}(undef, fill(2K + 1, DIM)...), #S
             BitArray{DIM}(undef, fill(2K + 1, DIM)...), # computedyet
             tmpsinkcosk,
+            nbfouriermodes, fourier_coeffs_∂rho, approx_rho, invks,
             zeros(T, 2), # Eelec²tot² (tuple)
             similar(particles.v[:, 1]), # momentum
             symplectic_rkn4{T}(particles.x, dt), # rkn
+            # rkn4{T}(particles.x, dt), # rk4
             # rkn5{T}(particles.x, dt),
             dt, T, DIM)
     end
@@ -301,7 +353,6 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
     ###
     # Works only in 1D for now
     ###
-    nbfouriermodes = 2pmover.K + 1
     ε = 1e-12
 
     for idp = 1:p.nbpart
@@ -316,35 +367,26 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
     end
 
     L = pmover.torus[1]
-    fourier_coeffs_∂rho = nufft1d1(2π ./ L .* x[1, :] .- π,
-        convert.(ComplexF64, p.β .* L ./ 2π),
+
+    pmover.fourier_coeffs_∂rho .= nufft1d1(2π ./ L .* x[1, :] .- π,
+        convert.(ComplexF64, p.β),
         -1,
         ε,
-        nbfouriermodes
-    ) ./ pmover.torus[1]
-
-    # Prepare to divide by -k^2
-    invks = -(nbfouriermodes - 1)/2:(nbfouriermodes-1)/2 |> collect
-    invks[Int64((nbfouriermodes - 1) / 2 + 1)] = 1
-    invks = 1 ./ invks
-    idxzero = Int64((nbfouriermodes - 1) / 2 + 1)
-    invks[idxzero] = 0
-    invks ./= 2π/L
-    
-    # Divide fourier coefficients by k^2
-    fourier_coeffs_rho = fourier_coeffs_∂rho .* invks
-
-    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation
-    approx_rho = nufft1d2(2π ./ L .* x[1, :] .- π,
-        1,
-        ε,
-        fourier_coeffs_rho
+        pmover.nbfouriermodes
     )
 
-    for k = 0:(nbfouriermodes-1)/2
-        idxk = Int64(k + (nbfouriermodes - 1) / 2 + 1)
-        idxminusk = Int64(-k + (nbfouriermodes - 1) / 2 + 1)
-        ck, sk = reim(fourier_coeffs_∂rho[idxk])
+    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation
+    pmover.approx_rho .= nufft1d2(2π ./ L .* x[1, :] .- π,
+        1,
+        ε,
+        pmover.fourier_coeffs_∂rho .* pmover.invks
+    )
+
+    for k = 0:(pmover.nbfouriermodes-1)/2
+        idxk = Int64(k + (pmover.nbfouriermodes - 1) / 2 + 1)
+        ck, sk = reim(pmover.fourier_coeffs_∂rho[idxk])
+        ck = -ck
+        idxminusk = Int64(-k + (pmover.nbfouriermodes - 1) / 2 + 1)
         pmover.S[idxk] = sk
         pmover.S[idxminusk] = -sk
         pmover.C[idxk] = ck
@@ -352,7 +394,8 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
 
     end
 
-    dst .= imag.(approx_rho')
+    dst .= -real.(pmover.approx_rho') ./ pmover.torus_size
+    # println(sum(imag.(approx_rho).^2))
 end
 
 
