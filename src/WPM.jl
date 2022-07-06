@@ -18,12 +18,13 @@ struct Particles{T}
     x::Array{T,2}    # list of the positions
     v::Array{T,2}    # list of the velocities
     β::Vector{T}      # list of the weights of the particules
+    cplxβ::Vector{Complex{T}}      # list of the weights of the particules
     nbpart::Int       # number of particules
     dim::Int
     type
 
     function Particles{T}(x, v, β) where {T<:Real}
-        new(x, v, β, size(x)[2], size(x)[1], T)
+        new(x, v, β, convert.(Complex{T}, β), size(x)[2], size(x)[1], T)
     end
 end
 
@@ -139,6 +140,8 @@ struct ParticleMover{T<:Real,DIM}
     fourier_coeffs_∂rho::Array{ComplexF64, 1}
     approx_rho::Array{ComplexF64, 1}
     invks::Array{ComplexF64, 1}
+    plan_fft::finufft_plan{T}
+    plan_invfft::finufft_plan{T}
     ###########################
     Eelec²tot²::Vector{T} # Holds Eelec² and Etot²
     momentum::Array{T,1}
@@ -152,11 +155,10 @@ struct ParticleMover{T<:Real,DIM}
         tmpsinkcosk = Array{T,2}(undef, 2, particles.nbpart)
         tmpsinkcoskᵗ = Array{T,2}(undef, particles.nbpart, 2)
 
-        # Only works in 1D for now
+        # FINUFFT: Only works in 1D for now
         nbfouriermodes = 2K+1
         fourier_coeffs_∂rho = Array{ComplexF64, 1}(undef, nbfouriermodes)
         approx_rho = Array{ComplexF64, 1}(undef, particles.nbpart)
-        # Prepare to divide by 2πk/L to compute ∇ Δ^{-1}ρ
         invks = Vector{ComplexF64}(undef, nbfouriermodes)
         invks .= -(nbfouriermodes - 1)/2:(nbfouriermodes-1)/2
         invks[Int64((nbfouriermodes - 1) / 2 + 1)] = 1
@@ -164,6 +166,10 @@ struct ParticleMover{T<:Real,DIM}
         invks = 1im * invks ./ invks .^ 2
         idxzero = Int64((nbfouriermodes - 1) / 2 + 1)
         invks[idxzero] = 0
+
+        ε = 1e-12
+        fft = finufft_makeplan(1, nbfouriermodes, -1, 1, ε; dtype=T)
+        invfft = finufft_makeplan(2, nbfouriermodes, +1, 1, ε; dtype=T)
         ##########################
 
         new(∂Φ,
@@ -173,6 +179,7 @@ struct ParticleMover{T<:Real,DIM}
             BitArray{DIM}(undef, fill(2K + 1, DIM)...), # computedyet
             tmpsinkcosk,
             nbfouriermodes, fourier_coeffs_∂rho, approx_rho, invks,
+            fft, invfft,
             zeros(T, 2), # Eelec²tot² (tuple)
             similar(particles.v[:, 1]), # momentum
             symplectic_rkn4{T}(particles.x, dt), # rkn
@@ -353,7 +360,6 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
     ###
     # Works only in 1D for now
     ###
-    ε = 1e-12
 
     for idp = 1:p.nbpart
         for d = 1:p.dim
@@ -368,19 +374,15 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
 
     L = pmover.torus[1]
 
-    pmover.fourier_coeffs_∂rho .= nufft1d1(2π ./ L .* x[1, :] .- π,
-        convert.(ComplexF64, p.β),
-        -1,
-        ε,
-        pmover.nbfouriermodes
-    )
+    pos_in_correct_interval = 2π ./ L .* x[1, :] .- π
 
-    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation
-    pmover.approx_rho .= nufft1d2(2π ./ L .* x[1, :] .- π,
-        1,
-        ε,
-        pmover.fourier_coeffs_∂rho .* pmover.invks
-    )
+    finufft_setpts!(pmover.plan_fft, pos_in_correct_interval)
+    finufft_exec!(pmover.plan_fft, p.cplxβ, pmover.fourier_coeffs_∂rho)
+    
+    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation:
+    finufft_setpts!(pmover.plan_invfft, pos_in_correct_interval)
+    pmover.fourier_coeffs_∂rho .*= pmover.invks
+    finufft_exec!(pmover.plan_invfft, pmover.fourier_coeffs_∂rho, pmover.approx_rho)
 
     for k = 0:(pmover.nbfouriermodes-1)/2
         idxk = Int64(k + (pmover.nbfouriermodes - 1) / 2 + 1)
@@ -391,7 +393,6 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
         pmover.S[idxminusk] = -sk
         pmover.C[idxk] = ck
         pmover.C[idxminusk] = ck
-
     end
 
     dst .= -real.(pmover.approx_rho') ./ pmover.torus_size
