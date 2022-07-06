@@ -5,7 +5,8 @@ using Random
 using Distributions
 using SparseArrays
 using LinearAlgebra
-using FINUFFT
+# using FINUFFT
+using NFFT
 # using LoopVectorization # I did ``export JULIA_NUM_THREADS=auto`` in the terminal (not Julia REPL)
 # using InteractiveUtils # Import to use ``@code_warntype`` 
 
@@ -137,39 +138,36 @@ struct ParticleMover{T<:Real,DIM}
     tmpsinkcosk::Array{T,2}
     # Vérifier les dimensions :
     nbfouriermodes::Int64
-    fourier_coeffs_∂rho::Array{ComplexF64, 1}
-    approx_rho::Array{ComplexF64, 1}
-    invks::Array{ComplexF64, 1}
-    plan_fft::finufft_plan{T}
-    plan_invfft::finufft_plan{T}
+    fourier_coeffs_∂rho::Array{ComplexF64,1}
+    approx_rho::Array{ComplexF64,1}
+    invks::Array{ComplexF64,1}
+    plan_invfft::NFFTPlan{Float64,1,1}
     ###########################
     Eelec²tot²::Vector{T} # Holds Eelec² and Etot²
     momentum::Array{T,1}
     rkn::symplectic_rkn4{T}
     dt::T
     type
-    dim :: Int64
+    dim::Int64
 
     function ParticleMover{T,DIM}(particles::Particles, torus, K, dt) where {T<:Real,DIM}
         ∂Φ = similar(particles.x)
         tmpsinkcosk = Array{T,2}(undef, 2, particles.nbpart)
-        tmpsinkcoskᵗ = Array{T,2}(undef, particles.nbpart, 2)
 
-        # FINUFFT: Only works in 1D for now
-        nbfouriermodes = 2K+1
-        fourier_coeffs_∂rho = Array{ComplexF64, 1}(undef, nbfouriermodes)
-        approx_rho = Array{ComplexF64, 1}(undef, particles.nbpart)
+        # NFFT: Only works in 1D for now
+        nbfouriermodes = 2K
+        fourier_coeffs_∂rho = Array{ComplexF64,1}(undef, nbfouriermodes)
+        approx_rho = Array{ComplexF64,1}(undef, particles.nbpart)
+
         invks = Vector{ComplexF64}(undef, nbfouriermodes)
-        invks .= -(nbfouriermodes - 1)/2:(nbfouriermodes-1)/2
-        invks[Int64((nbfouriermodes - 1) / 2 + 1)] = 1
+        invks .= collect(-nbfouriermodes/2:(nbfouriermodes-1)/2)
+        invks[Int64(nbfouriermodes / 2 + 1)] = 1
         invks .*= 2π / torus[1]
-        invks = 1im * invks ./ invks .^ 2
-        idxzero = Int64((nbfouriermodes - 1) / 2 + 1)
-        invks[idxzero] = 0
+        invks = invks ./ (invks .^ 2)
+        invks[Int64(nbfouriermodes / 2 + 1)] = 0
 
-        ε = 1e-12
-        fft = finufft_makeplan(1, nbfouriermodes, -1, 1, ε; dtype=T)
-        invfft = finufft_makeplan(2, nbfouriermodes, +1, 1, ε; dtype=T)
+        ε = 1e-10
+        invfft = plan_nfft(particles.x ./ torus[1] .- 0.5, (nbfouriermodes,); reltol=ε)
         ##########################
 
         new(∂Φ,
@@ -179,7 +177,7 @@ struct ParticleMover{T<:Real,DIM}
             BitArray{DIM}(undef, fill(2K + 1, DIM)...), # computedyet
             tmpsinkcosk,
             nbfouriermodes, fourier_coeffs_∂rho, approx_rho, invks,
-            fft, invfft,
+            invfft,
             zeros(T, 2), # Eelec²tot² (tuple)
             similar(particles.v[:, 1]), # momentum
             symplectic_rkn4{T}(particles.x, dt), # rkn
@@ -372,23 +370,19 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
         end
     end
 
-    L = pmover.torus[1]
+    # Forward NFFT:
+    nodes!(pmover.plan_invfft, reshape(x[1, :] ./ pmover.torus[1] .- 0.5, 1, :))
+    pmover.fourier_coeffs_∂rho .= adjoint(pmover.plan_invfft) * p.cplxβ
 
-    pos_in_correct_interval = 2π ./ L .* x[1, :] .- π
+    # Now perform inverse NFFT to obtain approximate solution to Poisson equation:
+    pmover.fourier_coeffs_∂rho .*= pmover.invks * -1im
+    pmover.approx_rho .= pmover.plan_invfft * pmover.fourier_coeffs_∂rho
 
-    finufft_setpts!(pmover.plan_fft, pos_in_correct_interval)
-    finufft_exec!(pmover.plan_fft, p.cplxβ, pmover.fourier_coeffs_∂rho)
-    
-    # Now perform inverse NUFFT to obtain approximate solution to Poisson equation:
-    finufft_setpts!(pmover.plan_invfft, pos_in_correct_interval)
-    pmover.fourier_coeffs_∂rho .*= pmover.invks
-    finufft_exec!(pmover.plan_invfft, pmover.fourier_coeffs_∂rho, pmover.approx_rho)
-
-    for k = 0:(pmover.nbfouriermodes-1)/2
-        idxk = Int64(k + (pmover.nbfouriermodes - 1) / 2 + 1)
-        ck, sk = reim(pmover.fourier_coeffs_∂rho[idxk])
+    for k = 0:(pmover.nbfouriermodes/2-1)
+        idxk = Int64(k + pmover.nbfouriermodes / 2 + 1)
+        sk, ck = reim(pmover.fourier_coeffs_∂rho[idxk]) .* (2π / pmover.torus[1])
         ck = -ck
-        idxminusk = Int64(-k + (pmover.nbfouriermodes - 1) / 2 + 1)
+        idxminusk = Int64(-k + pmover.nbfouriermodes / 2 + 1)
         pmover.S[idxk] = sk
         pmover.S[idxminusk] = -sk
         pmover.C[idxk] = ck
@@ -396,7 +390,6 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
     end
 
     dst .= -real.(pmover.approx_rho') ./ pmover.torus_size
-    # println(sum(imag.(approx_rho).^2))
 end
 
 
