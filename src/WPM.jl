@@ -5,7 +5,6 @@ using Random
 using Distributions
 using SparseArrays
 using LinearAlgebra
-# using FINUFFT
 using NFFT
 # using LoopVectorization # I did ``export JULIA_NUM_THREADS=auto`` in the terminal (not Julia REPL)
 # using InteractiveUtils # Import to use ``@code_warntype`` 
@@ -166,7 +165,7 @@ struct ParticleMover{T<:Real,DIM}
         invks = invks ./ (invks .^ 2)
         invks[Int64(nbfouriermodes / 2 + 1)] = 0
 
-        ε = 1e-10
+        ε = 1e-12
         invfft = plan_nfft(particles.x ./ torus[1] .- 0.5, (nbfouriermodes,); reltol=ε)
         ##########################
 
@@ -354,7 +353,7 @@ function kernel_freestreaming!(dst, x, p, pmover)
 end
 
 
-function kernel_poisson_nufft!(dst, x, p, pmover)
+function kernel_poisson_nfft!(dst, x, p, pmover)
     ###
     # Works only in 1D for now
     ###
@@ -374,19 +373,21 @@ function kernel_poisson_nufft!(dst, x, p, pmover)
     nodes!(pmover.plan_invfft, reshape(x[1, :] ./ pmover.torus[1] .- 0.5, 1, :))
     pmover.fourier_coeffs_∂rho .= adjoint(pmover.plan_invfft) * p.cplxβ
 
-    # Now perform inverse NFFT to obtain approximate solution to Poisson equation:
+    # Inverse NFFT:
     pmover.fourier_coeffs_∂rho .*= pmover.invks * -1im
     pmover.approx_rho .= pmover.plan_invfft * pmover.fourier_coeffs_∂rho
 
-    for k = 0:(pmover.nbfouriermodes/2-1)
-        idxk = Int64(k + pmover.nbfouriermodes / 2 + 1)
-        sk, ck = reim(pmover.fourier_coeffs_∂rho[idxk]) .* (2π / pmover.torus[1])
-        ck = -ck
-        idxminusk = Int64(-k + pmover.nbfouriermodes / 2 + 1)
-        pmover.S[idxk] = sk
-        pmover.S[idxminusk] = -sk
-        pmover.C[idxk] = ck
-        pmover.C[idxminusk] = ck
+    index_freq_zero = convert(Int64, pmover.nbfouriermodes / 2 + 1)
+    for k = 0:(index_freq_zero-1)
+        idxk = k + index_freq_zero
+        idxminusk = -k + index_freq_zero
+        # sk, ck are inverted because of the multiplication by -1im:
+        sminusk, cminusk = reim(pmover.fourier_coeffs_∂rho[idxminusk]) .* (2π / pmover.torus[1])
+        cminusk = -cminusk
+        pmover.S[idxk] = -sminusk
+        pmover.S[idxminusk] = sminusk
+        pmover.C[idxk] = cminusk
+        pmover.C[idxminusk] = cminusk
     end
 
     dst .= -real.(pmover.approx_rho') ./ pmover.torus_size
