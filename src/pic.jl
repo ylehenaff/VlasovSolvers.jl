@@ -101,7 +101,7 @@ function sample_PIC_particles(nbparticles, example)
 
     # x,v sampling:
     #############
-    unifgridsize = max(Int64(1e6), nbparticles)
+    unifgridsize = 10 * nbparticles
     meshx = LinRange(0, example.L[1], unifgridsize+1)[1:end-1]
     x = meshx |> collect
     fx = example.f0x.(x)
