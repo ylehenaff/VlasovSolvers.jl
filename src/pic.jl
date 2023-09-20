@@ -12,7 +12,7 @@ function solve_PIC!(nsteps, dt, particles, example, gridsize; plotting=false)
     elec_history = zeros(Float64, nsteps)
     tot_history = zeros(Float64, nsteps)
     mom_history = zeros(Float64, nsteps)
-    dx = step(LinRange(0, example.L[1], gridsize))
+    dx = step(LinRange(0, example.L[1], gridsize+1)[1:end-1])
     plotEelec = plot([], [], xlim=(0, nsteps * dt), yaxis=:log10)
     #
     _, E = compute_phi_E(particles, dx, gridsize, example)
@@ -22,8 +22,8 @@ function solve_PIC!(nsteps, dt, particles, example, gridsize; plotting=false)
     #
     animation = @animate for istep in 2:nsteps
         x_step!(particles, 0.5dt, dx, example)
-        v_step!(particles, dt, gridsize, dx)
-        x_step!(particles, 0.5dt, dx,example)
+        v_step!(particles, dt, gridsize, dx, example)
+        x_step!(particles, 0.5dt, dx, example)
         _, E = compute_phi_E(particles, dx, gridsize, example)
         elec_history[istep] = sum(E.^2) * dx
         mom_history[istep] = sum(particles.v[1, :] .* particles.β)
@@ -166,7 +166,7 @@ function enforce_x_periodicity!(p, Ls)
 end
 
 
-function v_step!(p, dt, gridsize, dx)
+function v_step!(p, dt, gridsize, dx, example)
     _, E = compute_phi_E(p, dx, gridsize, example)
     for ipart in eachindex(p.x)
         igrid = Int64(fld(p.x[ipart], dx)) + 1

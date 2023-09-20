@@ -191,8 +191,8 @@ function test_rho()
 
     # example = LandauDamping_ND(; alpha=0.01, kxs=[0.5], mu=[0.0], beta=[1.0], shortname="test_1D", longname="Test 1D", L=nothing, vmax=[12.0]);
     # example = example_landaudamping_1D
-    # example = example_stronglandaudamping_1D
-    example = example_twostreaminstability_1D
+    example = example_stronglandaudamping_1D
+    # example = example_twostreaminstability_1D
     nx = 2^5
     nbparts = 100_000
 
@@ -228,12 +228,14 @@ function test_rho()
     plotE = plot(mesh, E, label="E approx")
     plot!(plotE, mesh, example.α ./ example.kxs[1] .* sin.(example.kxs[1] .* mesh)  ,label="E exact", seriestype=:scatter)
     
+    println("log10(sqrt(∫Elec^2)) = $(log10(sqrt(sum(E.^2) * dx)))")
     
-    plot(plotrho, plotrhoneutral, plotphi, plotE, layout=@layout([a; b; c; d]), size=(600, 600))
+    allplots = plot(plotrho, plotrhoneutral, plotphi, plotE, layout=@layout([a; b; c; d]), size=(600, 600))
+    return allplots
 end
 
-# test_rho()
-
+allplots = test_rho()
+display(allplots)
 
 
 
@@ -295,22 +297,25 @@ function test_inverse_CDF()
     example = example_landaudamping_1D
     # example = example_stronglandaudamping_1D
     # example = example_twostreaminstability_1D
-    nx = 2^6
-    nbparts = 10_000
+    nx = 2^5
+    nbparts = 100_000
     
     particles = sample_PIC_particles(nbparts, example)
 
-    plotscatter = scatter(particles.x[1, :], particles.v[1, :], zcolor=particles.β)
-    display(plotscatter)
+    # plotscatter = scatter(particles.x[1, :], particles.v[1, :], zcolor=particles.β)
+    # display(plotscatter)
     
     histx = histogram(particles.x[1, :], normalize=true, bins=nx, linewidth=0.)
     ## Focus
-    # y = histx[1][1][:y]
-    # y .-= y[1]
-    # extrema_y = extrema(x->isnan(x) ? y[1] : x, y[1:6:end][begin:end-1]) 
-    # ylims!(histx, extrema_y)
+    y = histx[1][1][:y]
+    y .-= y[1]
+    extrema_y = extrema(x->isnan(x) ? y[1] : x, y[1:6:end][begin:end-1]) 
+    ylims!(histx, extrema_y)
     ########
     display(histx)
 end
 
-test_inverse_CDF()
+# test_inverse_CDF()
+
+
+nothing

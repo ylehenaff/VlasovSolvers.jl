@@ -9,7 +9,7 @@ import VlasovSolvers: Particles, WPM_step!, ParticleMover, kernel_poisson!, kern
 using ProgressMeter, Printf
 using Plots, LaTeXStrings
 
-include("numerical_examples.jl");
+include("numerical_examples.jl")
 include("pic.jl")
 
 
@@ -130,7 +130,7 @@ function solve_WPM!(nsteps, dt, particles, example, weights;
     if (plotting) && (example.dim == 1)
         widthx = example.L[1]
         widthv = 2example.vmax[1]
-        scale = 0.5
+        scale = 1
         plotEelec = plot([], [], xlim=(0, nsteps * dt), yaxis=:log10)
     end
 
@@ -178,133 +178,119 @@ function solve_WPM!(nsteps, dt, particles, example, weights;
 end
 
 
-
-##################### INPUTS #####################
-dev = CPU()
-##################### Examples
-# example = example_landaudamping_1D
-# example = example_stronglandaudamping_1D
-# example = example_landaudamping_2D
-example = example_twostreaminstability_1D
-# example = example_bumpontail_1D
-# example = example_stationarygaussian_1D
-# example = example_nonhomogeneousstationarysolution_1D
-# example = example_test_1D
-#####################
-T = 50.0
-dt = 0.1
-nstep = convert(Int64, floor(T / dt))
-# 
-K = 3
-
-mytype = Float64
-
-quadX = RectangleRule
-quadV = RectangleRule
-nxwpm = 256
-nvwpm = 257
-quadrulesx = [quadX(nxwpm, 0, example.L[d]) for d = 1:example.dim];
-quadrulesv = [quadV(nvwpm, example.vmin[d], example.vmax[d]) for d = 1:example.dim];
-
-R = NaN
-dim = example.dim
+######################
 
 
-##################### PARTICLES (WPM) #####################
+function run_WPM(example, T, dt, nstep, K, mytype, nxwpm, nvwpm, quadX, quadV)
+    quadrulesx = [quadX(nxwpm, 0, example.L[d]) for d = 1:example.dim];
+    quadrulesv = [quadV(nvwpm, example.vmin[d], example.vmax[d]) for d = 1:example.dim];
 
-nbparticles = *(fill(nxwpm, dim)...) * *(fill(nvwpm, dim)...)
-
-x0_init = map(x -> [xx for xx in x], vec(collect(Base.product([rulex.points for rulex = quadrulesx]...))))
-v0_init = map(v -> [vv for vv in v], vec(collect(Base.product([rulev.points for rulev = quadrulesv]...))))
-x = map(z -> z[1], vec(collect(Base.product(x0_init, v0_init))))
-v = map(z -> z[2], vec(collect(Base.product(x0_init, v0_init))))
-
-wx = map(prod, vec(collect(Base.product([rulex.weights for rulex = quadrulesx]...))))
-wv = map(prod, vec(collect(Base.product([rulev.weights for rulev = quadrulesv]...))))
-weights = map(prod, vec(collect(Base.product(wx, wv))))
-
-fvals = example.f0.(x, v)
-wei = fvals .* weights
-
-x0 = reduce(hcat, x)
-v0 = reduce(hcat, v)
-
-particles = Particles{mytype}(x0, v0, wei);
-
-resWPM, animWPM = solve_WPM!(nstep, dt, particles, example, weights;
-    plotting=false, kernel=kernel_poisson_finufft!, R=R, K=K);
+    R = NaN
+    dim = example.dim
 
 
-t = (1:nstep) .* dt
-ε = 1e-18
-plotEelec = plot(minorgrid=true, size=(600, 400), yaxis=:log10, legend=:outerright)
-plot!(t .+ dt, max.(ε, sqrt.(resWPM.Eelec²)))
-title!(L"WPM: E_{elec}, v_{max}=" * "$(example.vmax)")
-display(plotEelec)
+    ##################### PARTICLES (WPM) #####################
 
+    nbparticles = *(fill(nxwpm, dim)...) * *(fill(nvwpm, dim)...)
 
-# ##################### PLOTS #####################
+    x0_init = map(x -> [xx for xx in x], vec(collect(Base.product([rulex.points for rulex = quadrulesx]...))))
+    v0_init = map(v -> [vv for vv in v], vec(collect(Base.product([rulev.points for rulev = quadrulesv]...))))
+    x = map(z -> z[1], vec(collect(Base.product(x0_init, v0_init))))
+    v = map(z -> z[2], vec(collect(Base.product(x0_init, v0_init))))
 
-# ##### Plot particles as a scatter plot #####
-# # scale = 5
-# # plot(particles.x[1, :], particles.v[1, :], seriestype=:scatter, zcolor=vec(particles.β),
-# #     markersize=sqrt(0.1) * scale, zticks=[], camera=(0, 90),
-# #     markerstrokecolor="white", markerstrokewidth=0, label="", c=:jet1,
-# #     size=(600, 600),
-# #     title="t = $(T)", titlefontsize=8, margin=5Plots.mm)
-# # xlabel!("x")
-# # ylabel!("v")
-# ############################################
+    wx = map(prod, vec(collect(Base.product([rulex.weights for rulex = quadrulesx]...))))
+    wv = map(prod, vec(collect(Base.product([rulev.weights for rulev = quadrulesv]...))))
+    weights = map(prod, vec(collect(Base.product(wx, wv))))
+
+    fvals = example.f0.(x, v)
+    wei = fvals .* weights
+
+    x0 = reduce(hcat, x)
+    v0 = reduce(hcat, v)
+
+    particles = Particles{mytype}(x0, v0, wei);
+
+    resWPM, animWPM = solve_WPM!(nstep, dt, particles, example, weights;
+        plotting=false, kernel=kernel_poisson_finufft!, R=R, K=K);
+    # gif(animWPM)
+
+    t = (1:nstep) .* dt
+    ε = 1e-18
 
 
 
-# ##### Interpolate values using triangulation,
-# ##### then do a 3d plot
-# quadrulesx = [quadX(nxwpm, 0, example.L[d]) for d = 1:example.dim];
-# quadrulesv = [quadV(nvwpm, example.vmin[d], example.vmax[d]) for d = 1:example.dim];
+    # ##################### PLOTS #####################
 
-# xout = map(x -> [xx for xx in x], vec(collect(Base.product([rulex.points for rulex = quadrulesx]...))))
-# vout = map(v -> [vv for vv in v], vec(collect(Base.product([rulev.points for rulev = quadrulesv]...))))
-
-# xout = map(z -> z[1], xout)
-# vout = map(z -> z[1], vout)
-
-# xout0 = reduce(hcat, map(z -> z[1], vec(collect(Base.product(xout, vout)))))
-# vout0 = reduce(hcat, map(z -> z[2], vec(collect(Base.product(xout, vout)))))
-
-
-# vals_on_grid_vec = triangulation_interpolation(particles.β ./ vec(weights), 
-#     particles.x[1, :], particles.v[1, :], xout0[1, :], vout0[1, :], example)[1]
-# vals_on_grid = reshape(vals_on_grid_vec, size(xout)[1], size(vout)[1])
-
-
-# myplot = heatmap(xout, vout, vals_on_grid', right_margin=5Plots.mm)
-# xlabel!(myplot, "x")
-# ylabel!(myplot, "v")
-# title!(myplot, example.longname * ", t = $(T)")
-# IMG_DIR = "/Users/ylehenaf/Documents/confs_presentations/CJC-MA-2023/beamer/png/"
-# fn = IMG_DIR * "WPM--" * example.shortname * "--dt_$(dt)--T_$(T)--K_$(K)--$(quadX)$(nxwpm)-$(quadV)$(nvwpm)--vmax_$(example.vmax[1])--kx_$(example.kxs[1]).png"
-# # savefig(myplot, fn)
-# display(myplot)
-#############################################
+    # ##### Plot particles as a scatter plot #####
+    # # scale = 5
+    # # plot(particles.x[1, :], particles.v[1, :], seriestype=:scatter, zcolor=vec(particles.β),
+    # #     markersize=sqrt(0.1) * scale, zticks=[], camera=(0, 90),
+    # #     markerstrokecolor="white", markerstrokewidth=0, label="", c=:jet1,
+    # #     size=(600, 600),
+    # #     title="t = $(T)", titlefontsize=8, margin=5Plots.mm)
+    # # xlabel!("x")
+    # # ylabel!("v")
+    # ############################################
 
 
 
+    # ##### Interpolate values using triangulation,
+    # ##### then do a 3d plot
+    # quadrulesx = [quadX(nxwpm, 0, example.L[d]) for d = 1:example.dim];
+    # quadrulesv = [quadV(nvwpm, example.vmin[d], example.vmax[d]) for d = 1:example.dim];
 
-###### 1D PIC simulations ######
-nbparticles_PIC = Int64(1e5)
-gridsize_PIC = 2^3
+    # xout = map(x -> [xx for xx in x], vec(collect(Base.product([rulex.points for rulex = quadrulesx]...))))
+    # vout = map(v -> [vv for vv in v], vec(collect(Base.product([rulev.points for rulev = quadrulesv]...))))
 
-pic_particles = sample_PIC_particles(nbparticles_PIC, example)
-# plot(pic_particles.x[1, :], pic_particles.v[1, :], zcolor=pic_particles.β, seriestype=:scatter)
-########
-elec, mom, tot = solve_PIC!(nstep, dt, pic_particles, example, gridsize_PIC)
-plotEelec = plot(minorgrid=true, size=(600, 400), yaxis=:log10, legend=:outerright)
-plot!(dt .* (1:nstep), elec)
-title!(L"PIC: E_{elec}, v_{max}=" * "$(example.vmax)" * ", Np = $nbparticles_PIC")
-# plot(dt .* (1:nstep), mom, label="momentum")
-# plot!(dt .* (1:nstep), tot, label="total energy")
-##################################################
+    # xout = map(z -> z[1], xout)
+    # vout = map(z -> z[1], vout)
+
+    # xout0 = reduce(hcat, map(z -> z[1], vec(collect(Base.product(xout, vout)))))
+    # vout0 = reduce(hcat, map(z -> z[2], vec(collect(Base.product(xout, vout)))))
+
+
+    # vals_on_grid_vec = triangulation_interpolation(particles.β ./ vec(weights), 
+    #     particles.x[1, :], particles.v[1, :], xout0[1, :], vout0[1, :], example)[1]
+    # vals_on_grid = reshape(vals_on_grid_vec, size(xout)[1], size(vout)[1])
+
+
+    # myplot = heatmap(xout, vout, vals_on_grid', right_margin=5Plots.mm)
+    # xlabel!(myplot, "x")
+    # ylabel!(myplot, "v")
+    # title!(myplot, example.longname * ", t = $(T)")
+    # IMG_DIR = "/Users/ylehenaf/Documents/confs_presentations/CJC-MA-2023/beamer/png/"
+    # fn = IMG_DIR * "WPM--" * example.shortname * "--dt_$(dt)--T_$(T)--K_$(K)--$(quadX)$(nxwpm)-$(quadV)$(nvwpm)--vmax_$(example.vmax[1])--kx_$(example.kxs[1]).png"
+    # # savefig(myplot, fn)
+    # display(myplot)
+    #############################################
+
+
+    ###
+    # REPRENDRE LE CALCUL DE E POUR PIC, ET OBTENIR LES BONNES VALEURS DÉJÀ EN t=0
+    ###
+
+
+
+    ###### 1D PIC simulations ######
+    nbparticles_PIC = Int64(1e5)
+    gridsize_PIC = 2^4
+
+    pic_particles = sample_PIC_particles(nbparticles_PIC, example)
+    # histogram2d(pic_particles.x[1, :], pic_particles.v[1, :], weights=pic_particles.β, bins=250)
+    # plot(pic_particles.x[1, :], pic_particles.v[1, :], zcolor=pic_particles.β, seriestype=:scatter)
+    ########
+    elec, mom, tot = solve_PIC!(nstep, dt, pic_particles, example, gridsize_PIC,plotting=false)
+
+
+    plotEelec = plot(minorgrid=true, size=(600, 400), yaxis=:log10, legend=:outerright)
+    plot!(t .+ dt, max.(ε, sqrt.(resWPM.Eelec²)), label="WPM")
+    plot!(t, max.(ε, sqrt.(elec)), label="PIC")
+    title!(L"PIC: E_{elec}, v_{max}=" * "$(example.vmax)" * ", Np = $nbparticles_PIC")
+    # plot(dt .* (1:nstep), mom, label="Mom PIC")
+    # hline!([example.momentumexact])
+    # plot(dt .* (1:nstep), tot, label="Etot PIC")
+    # hline!([example.Etot²exact])
+    #################################################
 
 
 
@@ -313,38 +299,71 @@ title!(L"PIC: E_{elec}, v_{max}=" * "$(example.vmax)" * ", Np = $nbparticles_PIC
 
 
 
-# t = (1:nstep) .* dt
+    # t = (1:nstep) .* dt
 
-# plotCk = plot(minorgrid=true, size=(600, 400), legend=:outerright)
-# for k = -K:K
-#     plot!(t, resWPM.C[k+K+1, :], label=L"k=" * "$k")
-# end
-# title!(L"C_k")
+    # plotCk = plot(minorgrid=true, size=(600, 400), legend=:outerright)
+    # for k = -K:K
+    #     plot!(t, resWPM.C[k+K+1, :], label=L"k=" * "$k")
+    # end
+    # title!(L"C_k")
 
-# plotSk = plot(minorgrid=true, size=(600, 400), legend=:outerright)
-# for k = -K:K
-#     plot!(t, resWPM.S[k+K+1, :], label=L"k=" * "$k")
-# end
-# title!(L"S_k")
+    # plotSk = plot(minorgrid=true, size=(600, 400), legend=:outerright)
+    # for k = -K:K
+    #     plot!(t, resWPM.S[k+K+1, :], label=L"k=" * "$k")
+    # end
+    # title!(L"S_k")
 
-# plotCk²Sk² = plot(minorgrid=true, size=(600, 400), yaxis=:log10, legend=:outerright)
-# ε = 0
-# for k = -K:K
-#     if sum(abs.(k)) == 0
-#         plot!([], [], label="")
-#     else
-#         plot!(t, max.(ε, resWPM.S[k+K+1, :] .^ 2 .+ resWPM.C[k+K+1, :] .^ 2), label=L"k=" * "$k")
-#     end
-# end
-# title!(L"\sqrt{S_k^2 + C_k^2}")
+    # plotCk²Sk² = plot(minorgrid=true, size=(600, 400), yaxis=:log10, legend=:outerright)
+    # ε = 0
+    # for k = -K:K
+    #     if sum(abs.(k)) == 0
+    #         plot!([], [], label="")
+    #     else
+    #         plot!(t, max.(ε, resWPM.S[k+K+1, :] .^ 2 .+ resWPM.C[k+K+1, :] .^ 2), label=L"k=" * "$k")
+    #     end
+    # end
+    # title!(L"\sqrt{S_k^2 + C_k^2}")
 
-# plotEelec = plot(minorgrid=true, size=(600, 400), yaxis=:log10, legend=:outerright)
-# plot!(t .+ dt, max.(ε, sqrt.(resWPM.Eelec²)), label=L"E_{elec}")
-# title!(L"E_{elec}, v_{max}=" * "$(example.vmax)")
+    # plotEelec = plot(minorgrid=true, size=(600, 400), yaxis=:log10, legend=:outerright)
+    # plot!(t .+ dt, max.(ε, sqrt.(resWPM.Eelec²)), label=L"E_{elec}")
+    # title!(L"E_{elec}, v_{max}=" * "$(example.vmax)")
 
-# plot(plotCk, plotSk, plotCk²Sk², plotEelec, size=(1200, 400), layout=@layout [a b; c d])
+    # plot(plotCk, plotSk, plotCk²Sk², plotEelec, size=(1200, 400), layout=@layout [a b; c d])
+
+end
 
 
+function main()
+    ##################### INPUTS #####################
+
+    ##################### Examples
+    example = example_landaudamping_1D
+    # example = example_stronglandaudamping_1D
+    # example = example_landaudamping_2D
+    # example = example_twostreaminstability_1D
+    # example = example_bumpontail_1D
+    # example = example_stationarygaussian_1D
+    # example = example_nonhomogeneousstationarysolution_1D
+    # example = example_test_1D
+    #####################
+
+    T = 20.0
+    dt = 0.1
+    nstep = convert(Int64, floor(T / dt))
+    # 
+    K = 3
+
+    mytype = Float64
+
+    quadX = RectangleRule
+    quadV = RectangleRule
+    nxwpm = 196
+    nvwpm = 197
+
+    run_WPM(example, T, dt, nstep, K, mytype, nxwpm, nvwpm, quadX, quadV)
+end
+
+main()
 
 
 ##################### BENCHMARKS #####################
