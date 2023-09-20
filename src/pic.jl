@@ -99,62 +99,37 @@ function sample_PIC_particles(nbparticles, example)
     # then draw x according to the density fx
     print("Sampling PIC particles: ")
 
-    # x sampling:
+    # x,v sampling:
     #############
     unifgridsize = max(Int64(1e6), nbparticles)
     meshx = LinRange(0, example.L[1], unifgridsize+1)[1:end-1]
     x = meshx |> collect
     fx = example.f0x.(x)
     fx ./= sum(fx)
-    cumulative_distribution_approx = cumsum(fx)
-    cumulative_distribution_approx ./= cumulative_distribution_approx[end]
-
-    low_discrepancy_seq = SobolSeq(1)
-    skip(low_discrepancy_seq, nbparticles)
-    # It is advised (https://github.com/JuliaMath/Sobol.jl) to skip the first
-    # values to have better uniformity
-    
-    # xx = zeros(Float64, nbparticles)
-    # progression = ProgressMeter.Progress(nbparticles, desc="Low-discrepancy sampling in x: ", showspeed=true)
-    # for i=1:nbparticles
-    #     s = Sobol.next!(low_discrepancy_seq)[1]
-    #     idx_highest_smaller = inverse_CDF(cumulative_distribution_approx, s)
-    #     xx[i] = meshx[idx_highest_smaller]
-    #     ProgressMeter.next!(progression)
-    # end
-    sobolVals = [Sobol.next!(low_discrepancy_seq)[1] for _ in 1:nbparticles]
-    indices = inverse_CDF(cumulative_distribution_approx, sobolVals)
-    xx = x[indices]
-    particles_x = reshape(xx, 1, nbparticles)
-
-    
-    # v sampling:
-    #############
     meshv = LinRange(example.vmin[1], example.vmax[1], unifgridsize+1)[1:end-1]
     v = meshv |> collect
     fv = example.f0v.(v)
     fv ./= sum(fv)
-    cumulative_distribution_approx = cumsum(fv)
-    cumulative_distribution_approx ./= cumulative_distribution_approx[end]
+    cumulative_distribution_approx_x = cumsum(fx)
+    cumulative_distribution_approx_x ./= cumulative_distribution_approx_x[end]
+    cumulative_distribution_approx_v = cumsum(fv)
+    cumulative_distribution_approx_v ./= cumulative_distribution_approx_v[end]
 
-    low_discrepancy_seq = SobolSeq(1)
-    skip(low_discrepancy_seq, nbparticles)
+    low_discrepancy_seq2d = SobolSeq(2)
+    skip(low_discrepancy_seq2d, nbparticles)
     # It is advised (https://github.com/JuliaMath/Sobol.jl) to skip the first
     # values to have better uniformity
-
-    # vv = zeros(Float64, nbparticles)
-    # progression = ProgressMeter.Progress(nbparticles, desc="Low-discrepancy sampling in v: ", showspeed=true)
-    # for i=1:nbparticles
-    #     s = Sobol.next!(low_discrepancy_seq)[1]
-    #     idx_highest_smaller = inverse_CDF(cumulative_distribution_approx, s)
-    #     vv[i] = meshv[idx_highest_smaller]
-    #     ProgressMeter.next!(progression)
-    # end
-    sobolVals = [Sobol.next!(low_discrepancy_seq)[1] for _ in 1:nbparticles]
-    indices = inverse_CDF(cumulative_distribution_approx, sobolVals)
-    vv = v[indices]
+    
+    sobolVals = Array{Float64, 2}(undef, 2, nbparticles)
+    for col = 1:nbparticles
+        sobolVals[:, col] = Sobol.next!(low_discrepancy_seq2d)
+    end
+    indices_x = inverse_CDF(cumulative_distribution_approx_x, sobolVals'[:, 1])
+    indices_v = inverse_CDF(cumulative_distribution_approx_v, sobolVals'[:, 2])
+    xx = x[indices_x]
+    vv = v[indices_v]
+    particles_x = reshape(xx, 1, nbparticles)
     particles_v = reshape(vv, 1, nbparticles)
-
 
     particles_pic = Particles{Float64}(particles_x, particles_v, (example.L[1] / nbparticles) .* ones(nbparticles))
 
