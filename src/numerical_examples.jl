@@ -1,9 +1,13 @@
+using Roots, SpecialFunctions
+
 struct LandauDamping_ND
     α
     kxs
     μ
     β
     f0
+    f0x
+    f0v
     shortname
     longname
     L
@@ -15,10 +19,12 @@ struct LandauDamping_ND
     dim
 
     function LandauDamping_ND(; alpha=0.001, kxs=[0.5], mu=[0.0], beta=[1.0],
-        shortname="Landau2D", longname="(Strong/Weak) Landau damping 2D", L=nothing, vmax=[9.0])
+        shortname="Landau_ND", longname="(Strong/Weak) Landau damping n-D", L=nothing, vmax=[9.0])
         isnothing(L) ? L = 2π ./ kxs : nothing
         d = length(kxs)
-        f(x, v) = (1 + alpha * *(cos.(kxs .* x)...)) * *([exp(-beta[dd] * (v[dd] - mu[dd])^2 / 2) / √(2π / beta[dd]) for dd = 1:d]...)
+        fx(x) = 1 + alpha * *(cos.(kxs .* x)...)
+        fv(v) = *([exp(-beta[dd] * (v[dd] - mu[dd])^2 / 2) / √(2π / beta[dd]) for dd = 1:d]...)
+        f(x, v) = fx(x) * fv(v)
         Etot = -1.0
         mom = -1.0
         L²norm² = -1.0
@@ -33,6 +39,7 @@ struct LandauDamping_ND
         end
         new(alpha, kxs, mu, beta,
             f,
+            fx, fv,
             shortname, longname,
             L, .-vmax, vmax,
             Etot,
@@ -50,6 +57,8 @@ struct TwoStreamInstability_ND
     kxs
     β
     f0
+    f0x
+    f0v
     shortname
     longname
     L
@@ -65,7 +74,9 @@ struct TwoStreamInstability_ND
         shortname="TSI", longname="Two-Stream Instability", L=nothing, vmax=[9.0])
         isnothing(L) ? L = 2π ./ kxs : nothing
         d = length(kxs)
-        f(x, v) = (1 + alpha * *(cos.(kxs .* x)...)) * *([(exp(-beta[dd] * (v[dd] - v0[dd])^2 / 2) + exp(-beta[dd] * (v[dd] + v0[dd])^2 / 2)) / (2 * √(2π / beta[dd])) for dd = 1:d]...)
+        f0x(x) = 1 + alpha * *(cos.(kxs .* x)...)
+        f0v(v) = *([(exp(-beta[dd] * (v[dd] - v0[dd])^2 / 2) + exp(-beta[dd] * (v[dd] + v0[dd])^2 / 2)) / (2 * √(2π / beta[dd])) for dd = 1:d]...)
+        f(x, v) = f0x(x) * f0v(v)
         if d == 1
             Etot = 0.5 * (L[1] * (1 + v0[1]^2) + alpha^2 * L[1]^3 / (8π^2))
             mom = 0.0
@@ -76,7 +87,7 @@ struct TwoStreamInstability_ND
             nothing
         end
         new(alpha, kxs, beta,
-            f,
+            f, f0x, f0v,
             shortname, longname,
             L,
             .-vmax, vmax, v0,
@@ -93,6 +104,8 @@ struct TwoStreamInstabilityAlternativeFormulation_1D
     kx
     β
     f0
+    f0x
+    f0y
     shortname
     longname
     L
@@ -106,9 +119,12 @@ struct TwoStreamInstabilityAlternativeFormulation_1D
     function TwoStreamInstabilityAlternativeFormulation_1D(; alpha=0.05, kx=0.2, beta=1.0,
         shortname="TSI_alt", longname="Two-Stream Instability Alternative Formulation", L=nothing, vmin=-9.0, vmax=9.0)
         isnothing(L) ? L = 2π / kx : nothing
-        f(x, v) = (1 - alpha * cos(kx * x)) * exp(-beta * v^2 / 2) * v^2 / √(2π / beta)
+        fx(x) = (1 - alpha * cos(kx * x))
+        fv(v) = exp(-beta * v^2 / 2) * v^2 / √(2π / beta)
+        f(x, v) = fx(x) * fv(v)
         new(alpha, kx, beta,
             f,
+            fx, fv,
             shortname, longname,
             L,
             vmin, vmax,
@@ -132,6 +148,8 @@ struct BumpOnTail_ND
     n₁
     n₂
     f0
+    f0x
+    f0v
     shortname
     longname
     L
@@ -147,8 +165,10 @@ struct BumpOnTail_ND
         n1=0.9, n2=0.2, shortname="BoT", longname="Bump on Tail", L=nothing, vmax=[9.0])
         isnothing(L) ? L = 2π ./ kxs : nothing
         d = length(kxs)
-        f(x, v) = (1 + alpha * *(cos.(kxs .* x)...)) *
-                  *([(n1 * exp(-beta1[dd] * (v[dd] - mu1[dd])^2 / 2) + n2 * exp(-beta2[dd] * (v[dd] - mu2[dd])^2 / 2)) / (n1 * sqrt(2π / beta1[dd]) + n2 * sqrt(2π / beta2[dd])) for dd = 1:d]...)
+        fx(x) = (1 + alpha * *(cos.(kxs .* x)...))
+        fv(v) = *([(n1 * exp(-beta1[dd] * (v[dd] - mu1[dd])^2 / 2) + n2 * exp(-beta2[dd] * (v[dd] - mu2[dd])^2 / 2)) / (n1 * sqrt(2π / beta1[dd]) + n2 * sqrt(2π / beta2[dd])) for dd = 1:d]...)
+        f(x, v) = fx(x) * fv(v)
+                  
         if d == 1
             Etot = 0.5 * L[1] * ((
                        n1 * sqrt(2π / beta1[1]) * (1 / beta1[1] + mu1[1]^2) +
@@ -170,6 +190,7 @@ struct BumpOnTail_ND
             beta1, beta2,
             n1, n2,
             f,
+            fx, fv,
             shortname, longname,
             L,
             .-vmax, vmax,
@@ -285,6 +306,37 @@ struct Test_1D
     end
 end
 
+
+# ==================
+struct NonSmoothToyModel_1D
+    α
+    kxs
+    μ
+    β
+    f0
+    shortname
+    longname
+    L
+    vmin
+    vmax
+    dim
+
+    function NonSmoothToyModel_1D(; alpha=1., kxs=[0.5], mu=[0.0], beta=[1.0],
+        shortname="NonSmooth_1D", longname="Non smooth (in x) toy model", L=nothing, vmax=[9.0])
+        isnothing(L) ? L = 2π ./ kxs : nothing
+        d = length(kxs)
+        f(x, v) = 2alpha/L * (L/2 .- abs.(x .- L/2)) * *([exp(-beta[dd] * (v[dd] - mu[dd])^2 / 2) / √(2π / beta[dd]) for dd = 1:d]...)
+        # f(x, v) = (1 + alpha * *(cos.(kxs .* x)...)) * *([exp(-beta[dd] * (v[dd] - mu[dd])^2 / 2) / √(2π / beta[dd]) for dd = 1:d]...)
+
+        new(alpha, kxs, mu, beta,
+            f,
+            shortname, longname,
+            L, .-vmax, vmax,
+            d
+        )
+    end
+end
+
 # ==================
 
 
@@ -297,7 +349,7 @@ example_landaudamping_2D = LandauDamping_ND(; alpha=0.05, kxs=[0.5, 0.5], mu=[0.
     shortname="Landau_2D", longname="Weak Landau damping 2D", L=nothing, vmax=[12.0, 12.0]);
 
 ## TSI
-example_twostreaminstability_1D = TwoStreamInstability_ND(alpha=0.001, kxs=[0.2], v0=[3.0], vmax=[12.0]);
+example_twostreaminstability_1D = TwoStreamInstability_ND(alpha=0.001, kxs=[0.2], v0=[3.0], vmax=[12.0], shortname="TSI_1D", longname="Two-Stream Instability 1D");
 example_twostreaminstabilityalternativeformulation_1D = TwoStreamInstabilityAlternativeFormulation_1D(alpha=0.05,
     kx=0.2, vmin=-12.0, vmax=12.0);
 
@@ -316,3 +368,6 @@ example_stationarygaussian_1D = StationaryGaussian_1D(alpha=0.2, kxs=[1.], beta=
 ## Others
 example_test_1D = Test_1D(alpha=0.2, kx=1, beta=1,
     vmin=-12.0, vmax=12.0);
+
+## C^0 but not C^1 in x, gaussian in v
+example_NonSmoothToyModel_1D = NonSmoothToyModel_1D(; alpha=1., kxs=[0.5], mu=[0.0], beta=[1.0], vmax=[12.0])
